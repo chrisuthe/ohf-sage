@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from .config import load_config, authorities_for
-from .records import is_authority, is_substantive, shape_record
+from .records import is_authority, is_substantive, shape_record, extract_reactions
 from . import github
 
 _ISSUE_NUM = re.compile(r"/issues/(\d+)")
@@ -33,7 +33,8 @@ def harvest_repo(repo_cfg, config):
             if keep(c):
                 records.append(shape_record(
                     "review_comment", repo, c["user"]["login"], c["created_at"],
-                    c["html_url"], c["body"], context=c.get("pull_request_url", "")))
+                    c["html_url"], c["body"], context=c.get("pull_request_url", ""),
+                    reactions=extract_reactions(c)))
     except github.GhError as e:
         print(f"  ! review_comment harvest incomplete for {repo}: {e}", file=sys.stderr)
 
@@ -52,7 +53,8 @@ def harvest_repo(repo_cfg, config):
                 kind = "wont_support" if n in not_planned else "issue_comment"
                 records.append(shape_record(
                     kind, repo, c["user"]["login"], c["created_at"],
-                    c["html_url"], c["body"], context=c.get("issue_url", "")))
+                    c["html_url"], c["body"], context=c.get("issue_url", ""),
+                    reactions=extract_reactions(c)))
     except github.GhError as e:
         print(f"  ! issue_comment harvest incomplete for {repo}: {e}", file=sys.stderr)
 
@@ -65,11 +67,50 @@ def harvest_repo(repo_cfg, config):
                 if is_authority(author, allowed) and is_substantive(review.get("body")):
                     records.append(shape_record(
                         "review", repo, author, review.get("submitted_at", ""),
-                        review["html_url"], review["body"], context=f"pr#{number} {title}"))
+                        review["html_url"], review["body"], context=f"pr#{number} {title}",
+                        reactions=extract_reactions(review)))
         except github.GhError as e:
             print(f"  ! review harvest incomplete for {repo}: {e}", file=sys.stderr)
 
+    if defaults.get("with_threads"):
+        pr_nums = set()
+        for rec in records:
+            if rec["kind"] == "review_comment":
+                m = re.search(r"/pull/(\d+)", rec["html_url"])
+                if m:
+                    pr_nums.add(int(m.group(1)))
+        try:
+            resolved = github.resolved_comment_urls(repo, sorted(pr_nums))
+        except github.GhError as e:
+            print(f"  ! adoption pass failed for {repo}: {e}", file=sys.stderr)
+            resolved = set()
+        for rec in records:
+            if rec["kind"] == "review_comment" and rec["html_url"] in resolved:
+                rec["adopted"] = True
+
     return records
+
+
+def _authored_filename(repo, path):
+    return repo.replace("/", "__") + "__" + path.replace("/", "__")
+
+
+def harvest_authored(repo_cfg, config, out_dir):
+    repo = repo_cfg["repo"]
+    defaults = config.get("defaults", {})
+    paths = list(repo_cfg.get("authored_docs", defaults.get("authored_docs", [])))
+    paths += list(repo_cfg.get("config_files", defaults.get("config_files", [])))
+    written = []
+    dest_dir = Path(out_dir) / "authored"
+    for path in paths:
+        text = github.fetch_file(repo, path)
+        if not text:
+            continue
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / _authored_filename(repo, path)
+        dest.write_text(text, encoding="utf-8")
+        written.append(str(dest))
+    return written
 
 
 def suggest_authorities(repo):
@@ -98,6 +139,8 @@ def main(argv=None):
     ap.add_argument("--out-dir", default="corpus")
     ap.add_argument("--review-limit", type=int, default=None,
                     help="override defaults.review_pr_limit (PRs/authority scanned for review summaries)")
+    ap.add_argument("--with-threads", action="store_true", default=None,
+                    help="detect adopted (resolved-thread) review comments via GraphQL")
     args = ap.parse_args(argv)
 
     if args.suggest_authorities:
@@ -108,6 +151,8 @@ def main(argv=None):
     config = load_config(args.config)
     if args.review_limit is not None:
         config.setdefault("defaults", {})["review_pr_limit"] = args.review_limit
+    if args.with_threads:
+        config.setdefault("defaults", {})["with_threads"] = True
     repos = config["repos"]
     if args.repo:
         wanted = set(args.repo)
@@ -122,6 +167,9 @@ def main(argv=None):
             continue
         out = _write_corpus(repo, records, args.out_dir)
         print(f"{repo}: {len(records)} records -> {out}")
+        authored = harvest_authored(repo_cfg, config, args.out_dir)
+        if authored:
+            print(f"  authored: {len(authored)} file(s)")
     return 0
 
 
