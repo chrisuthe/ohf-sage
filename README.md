@@ -96,6 +96,22 @@ knows — weigh its confidence accordingly:
 | `[authored]` | Stated in a maintainer doc (`AGENTS.md`, `CONTRIBUTING.md`, …) — firm policy |
 | `[enforced]` | Codified in a tool/CI config (`ruff`/`mypy`/`pre-commit`) — mechanically checked |
 | `[mined · N PRs · 👍]` | Inferred from review history across N distinct PRs; `· 👍` when maintainers endorsed it |
+| `[captured]` | Manually added from a GitHub URL; carries a real permalink |
+| `[attested: who · channel · date]` | Manually added from a paste (Slack/verbal); user-attested, not publicly verifiable |
+
+## Adding out-of-band guidance
+
+You can add your own principles locally without updating the shipped corpus:
+
+- Run the **`add-manual-principle`** skill to capture a principle from a paste
+  (Slack message, verbal note) — marked `[attested: who · channel · date]` — or
+  from a GitHub URL — marked `[captured]`. It writes a **local, git-excluded**
+  `.claude/agents/ohf-sage-manual.md` that ohf-sage applies automatically.
+  Nothing is published; the entry stays private to your setup.
+
+- To contribute an entry to the shared repo, run **`propose-principle-upstream`**,
+  which opens a GitHub issue for maintainer review. **This publishes your claim
+  publicly**, so it asks for explicit confirmation before opening the issue.
 
 ## Whose principles these are
 
