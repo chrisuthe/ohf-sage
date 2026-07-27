@@ -72,6 +72,19 @@ It responds with a **verdict first** (e.g. "won't be accepted as-is"), then the
 governing principle(s), each linking to the PR/issue or maintainer doc it came
 from, and separates hard `MUST` / "won't support" rules from softer preferences.
 
+When no distilled rule covers a question, ohf-sage greps a shipped review-history corpus (`.claude/agents/ohf-sage-corpus.jsonl`, ~6 MB, copied in by `install.py`; use `--no-corpus` to skip it) and cites the real comments, labelled as retrieved.
+
+## Searching the review history
+
+Query the raw mined comments directly:
+
+```bash
+python -m ohf_principles.search "<terms>" [--repo <owner/repo>] [--author <login>] [--top N]
+```
+
+Prints the top matching review comments — author, permalink, and a snippet — ranked
+by keyword overlap, author authority, and 👍 reactions.
+
 ## Understanding its answers
 
 Every rule the advisor cites ends with a **provenance marker** telling you how it
