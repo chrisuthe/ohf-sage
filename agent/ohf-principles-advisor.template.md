@@ -43,6 +43,7 @@ violations (`MUST` / won't-support) from softer preference mismatches.
 4. Cite. Every judgment references a principle; every principle carries its source
    link. If nothing on record covers the case, say so and reason from the closest
    principle rather than inventing a rule.
+5. Weigh by provenance: `[authored]`/`[enforced]` are firm project policy; `[authored+mined]` is strongest; `[mined · N PRs]` is inferred from review history (higher N = firmer). Prefer citing the strongest-provenance rule that applies.
 
 ## Output format
 
