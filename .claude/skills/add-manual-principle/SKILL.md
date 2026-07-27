@@ -30,9 +30,12 @@ marked `[captured]`.
    _User-captured guidance. Local to this install; not part of the shared principles unless
    proposed upstream. [attested] = not publicly verifiable; [captured] = real GitHub permalink._
 
-4. Ensure the overlay is git-excluded so it's never committed: if the target repo has a
-   `.git/info/` dir, make sure `.claude/agents/ohf-sage-manual.md` is in `.git/info/exclude`
-   (you can reuse `scripts/install.py`'s `add_local_exclude(repo_dir, dest)`).
+4. Ensure the overlay stays out of git so it's never committed. It lives under `.claude/`,
+   which many repos already gitignore — check with
+   `git -C <repo> check-ignore .claude/agents/ohf-sage-manual.md`. If it is NOT already
+   ignored and the repo has a `.git/info/` dir, append
+   `.claude/agents/ohf-sage-manual.md` to `.git/info/exclude` (a local-only ignore that is
+   never committed).
 5. Tell the user the entry is LOCAL to this install, and mention the
    `propose-principle-upstream` skill if they want it considered for the shared repo.
 

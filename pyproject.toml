@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ohf-sage"
+version = "0.1.0"
+description = "OHF Sage — mine, distill, and apply Open Home Foundation / Music Assistant project principles."
+requires-python = ">=3.9"
+dependencies = ["pyyaml"]
+
+[project.scripts]
+ohf-sage-search = "ohf_principles.search:main"
+ohf-sage-capture = "ohf_principles.capture:main"
+
+[tool.setuptools]
+packages = ["ohf_principles"]
