@@ -58,4 +58,4 @@ Requirements: Claude Code. No Python needed just to *use* the agent — the inst
 
 ---
 
-Want to regenerate the principles or mine more OHF repos? See [README.md](README.md).
+Want to regenerate the principles or mine more OHF repos? See [DEVELOPING.md](DEVELOPING.md).
