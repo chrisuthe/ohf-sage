@@ -2,18 +2,31 @@
 import json
 import subprocess
 import sys
+import time
 
 
 class GhError(RuntimeError):
     pass
 
 
-def _run(args):
-    proc = subprocess.run(args, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
-    if proc.returncode != 0:
-        raise GhError(proc.stderr.strip() or f"gh failed: {' '.join(args)}")
-    return proc.stdout
+_RATELIMIT_MARKERS = ("rate limit", "secondary rate", "abuse detection")
+
+
+def _run(args, retries=4):
+    for attempt in range(1, retries + 1):
+        proc = subprocess.run(args, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+        if proc.returncode == 0:
+            return proc.stdout
+        stderr = (proc.stderr or "").strip()
+        if any(m in stderr.lower() for m in _RATELIMIT_MARKERS) and attempt < retries:
+            wait = 30 * attempt
+            print(f"  ... gh rate-limited, waiting {wait}s (attempt {attempt}/{retries})",
+                  file=sys.stderr)
+            time.sleep(wait)
+            continue
+        raise GhError(stderr or f"gh failed: {' '.join(args)}")
+    raise GhError(f"gh failed after {retries} attempts: {' '.join(args)}")
 
 
 def gh_api_items(path):
@@ -63,7 +76,12 @@ def fetch_reviews(repo, authorities, limit):
             print(f"  ! review search failed for {repo} reviewed-by:{authority}: {e}",
                   file=sys.stderr)
     for number, title in titles.items():
-        for review in gh_api_items(f"repos/{repo}/pulls/{number}/reviews?per_page=100"):
+        try:
+            reviews = list(gh_api_items(f"repos/{repo}/pulls/{number}/reviews?per_page=100"))
+        except GhError as e:
+            print(f"  ! reviews fetch failed for {repo}#{number}: {e}", file=sys.stderr)
+            continue
+        for review in reviews:
             if (review.get("body") or "").strip():
                 yield review, number, title
 

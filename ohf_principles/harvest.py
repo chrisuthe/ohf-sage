@@ -53,12 +53,15 @@ def harvest_repo(repo_cfg, config):
     # Review summaries (targeted via search, capped per authority)
     if defaults.get("harvest_reviews", True):
         limit = defaults.get("review_pr_limit", 250)
-        for review, number, title in github.fetch_reviews(repo, sorted(allowed), limit):
-            author = (review.get("user") or {}).get("login")
-            if is_authority(author, allowed) and is_substantive(review.get("body")):
-                records.append(shape_record(
-                    "review", repo, author, review.get("submitted_at", ""),
-                    review["html_url"], review["body"], context=f"pr#{number} {title}"))
+        try:
+            for review, number, title in github.fetch_reviews(repo, sorted(allowed), limit):
+                author = (review.get("user") or {}).get("login")
+                if is_authority(author, allowed) and is_substantive(review.get("body")):
+                    records.append(shape_record(
+                        "review", repo, author, review.get("submitted_at", ""),
+                        review["html_url"], review["body"], context=f"pr#{number} {title}"))
+        except github.GhError as e:
+            print(f"  ! review harvest incomplete for {repo}: {e}", file=sys.stderr)
 
     return records
 
