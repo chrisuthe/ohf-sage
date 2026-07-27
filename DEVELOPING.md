@@ -107,6 +107,16 @@ layered `principles/principles.md` where every rule carries a provenance marker
 For a large corpus, chunk the mined records and fan the extraction out across
 agents, then synthesize — a single agent can't hold ~10k comments in context.
 
+### 5a. Manual overlay (local, per-user)
+
+In addition to the harvested and distilled `principles/principles.md`, ohf-sage
+supports a per-user **local overlay** `.claude/agents/ohf-sage-manual.md` (git-excluded)
+captured via the `add-manual-principle` skill. This overlay is not harvested, not
+part of the shipped corpus, and stays private to your setup. To contribute an
+entry to the shared `principles.md` upstream, use `propose-principle-upstream`,
+which opens a GitHub issue for maintainer review and publishes the claim publicly
+(with explicit confirmation).
+
 ### 6. Review the principles (required)
 
 `principles/principles.md` is the human checkpoint: read it, correct anything
