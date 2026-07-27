@@ -1,0 +1,22 @@
+# Whose voice counts, and where. Home Assistant repos are deliberately excluded.
+global_authorities: [marcelveldt]        # authoritative in every repo
+
+defaults:
+  since: null            # ISO-8601 date (e.g. "2023-01-01") for incremental harvest; null = all history
+  harvest_reviews: true  # also pull pulls/{n}/reviews summary bodies (slower, high signal)
+  review_pr_limit: 250   # cap PRs-per-authority scanned for review summaries (newest first, via search)
+
+repos:
+  - repo: music-assistant/server
+    authorities: [MarvinSchenkel, OzGav, florianhorner]
+  - repo: music-assistant/support
+    authorities: [MarvinSchenkel]
+    focus: wont_support
+  - repo: music-assistant/frontend
+    authorities: [MarvinSchenkel]
+  - repo: music-assistant/mobile-app
+    authorities: [MarvinSchenkel]
+  - repo: music-assistant/desktop-app
+    authorities: [MarvinSchenkel]
+  # ESPHome / OHF-Voice / Sendspin repos: add with their own core maintainers,
+  # discovered via `python -m ohf_principles.harvest --suggest-authorities <repo>`.
