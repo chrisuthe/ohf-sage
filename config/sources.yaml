@@ -4,7 +4,7 @@ global_authorities: [marcelveldt]        # authoritative in every repo
 defaults:
   since: null            # ISO-8601 date (e.g. "2023-01-01") for incremental harvest; null = all history
   harvest_reviews: true  # also pull pulls/{n}/reviews summary bodies (slower, high signal)
-  review_pr_states: [closed]  # which PRs to scan for review summaries
+  review_pr_limit: 250   # cap PRs-per-authority scanned for review summaries (newest first, via search)
 
 repos:
   - repo: music-assistant/server
