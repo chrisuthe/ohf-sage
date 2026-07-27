@@ -87,8 +87,8 @@ global_authorities: [marcelveldt]        # authoritative in every repo
 
 defaults:
   since: null            # ISO-8601 date (e.g. "2023-01-01") for incremental harvest; null = all history
-  harvest_reviews: true  # also pull pulls/{n}/reviews summary bodies (slower, high signal)
-  review_pr_states: [closed]  # which PRs to scan for review summaries
+  harvest_reviews: true  # also pull pulls/{n}/reviews summary bodies (high signal)
+  review_pr_limit: 250   # cap PRs-per-authority scanned for review summaries (newest first, via search)
 
 repos:
   - repo: music-assistant/server
@@ -308,18 +308,20 @@ git commit -m "Add authority filtering and record shaping helpers"
 - Produces (github.py):
   - `gh_api_items(path: str) -> Iterator[dict]` — streams each element of a paginated array endpoint via `gh api --paginate --jq '.[]'`.
   - `gh_api_json(path: str) -> dict|list` — single non-paginated response.
-  - `fetch_review_comments(repo)`, `fetch_issue_comments(repo)`, `fetch_reviews(repo, states)`, `not_planned_issue_numbers(repo) -> set[int]` — each yields/returns raw GitHub dicts.
+  - `fetch_review_comments(repo)`, `fetch_issue_comments(repo)`, `not_planned_issue_numbers(repo) -> set[int]` — each yields/returns raw GitHub dicts.
+  - `search_reviewed_prs(repo, authority, limit) -> list[dict]` — the `limit` most-recently-updated PRs in `repo` reviewed by `authority`, via `gh search prs --reviewed-by`. Each dict has `number` and `title`.
+  - `fetch_reviews(repo, authorities, limit)` — yields `(review_dict, pr_number, pr_title)` for reviews with a non-empty body, across the deduped union of PRs reviewed by any authority (each authority capped at `limit`, newest-first).
 - Produces (harvest.py):
   - `harvest_repo(repo_cfg, config) -> list[dict]` — filtered, shaped records for one repo.
   - `suggest_authorities(repo) -> list[tuple[str,int]]` — top review-comment authors.
-  - `main()` — argparse CLI: `--config`, `--repo` (repeatable, default all), `--suggest-authorities <repo>`, `--out-dir` (default `corpus`).
+  - `main()` — argparse CLI: `--config`, `--repo` (repeatable, default all), `--suggest-authorities <repo>`, `--out-dir` (default `corpus`), `--review-limit <N>` (override `defaults.review_pr_limit` for this run).
 
 **Notes for the implementer:**
 - `gh api --paginate --jq '.[]'` prints one JSON object per line across all pages; parse line-by-line with `json.loads`. Do NOT try to `json.loads` the whole multi-page output at once.
 - `issues/comments` covers both issues *and* PRs (a PR is an issue), so this is where PR-thread discussion is captured.
 - A comment whose issue number is in `not_planned_issue_numbers(repo)` is re-tagged `kind="wont_support"`.
-- Reviews require per-PR iteration (`pulls/{n}/reviews`); keep only non-empty `body` authored by an authority. This is the slow, thorough source (`harvest_reviews: true`).
-- Wrap `gh` failures per-repo: log to stderr and continue (rate limits / private repos must not abort the whole run).
+- Review summaries: discover the PRs each authority actually reviewed with `gh search prs --repo <repo> --reviewed-by <authority> --sort updated --limit <N>` (targeted — no scanning PRs nobody reviewed), dedupe the union, then fetch `pulls/{n}/reviews` for those and keep only non-empty `body` authored by an authority. `N` = `defaults.review_pr_limit` (default 250), overridable via `--review-limit`. `gh search prs --json` returns a single JSON array — `json.loads` it whole (unlike the streaming `gh api --paginate` endpoints).
+- Wrap `gh` failures per-repo AND per-authority-search: log to stderr and continue (rate limits / private repos / a search that errors for one authority must not abort the run).
 
 - [ ] **Step 1: Implement `ohf_principles/github.py`**
 
@@ -327,6 +329,7 @@ git commit -m "Add authority filtering and record shaping helpers"
 # ohf_principles/github.py
 import json
 import subprocess
+import sys
 
 
 class GhError(RuntimeError):
@@ -361,16 +364,32 @@ def fetch_issue_comments(repo):
     yield from gh_api_items(f"repos/{repo}/issues/comments?per_page=100")
 
 
-def fetch_pull_numbers(repo, states):
-    for state in states:
-        q = f"repos/{repo}/pulls?state={state}&per_page=100&sort=updated&direction=desc"
-        for pr in gh_api_items(q):
-            yield pr["number"], pr.get("title", "")
+def search_reviewed_prs(repo, authority, limit):
+    """The `limit` most-recently-updated PRs in `repo` reviewed by `authority`.
+
+    Returns a list of dicts with `number` and `title`. `gh search prs --json`
+    emits a single JSON array, so parse it whole.
+    """
+    out = _run([
+        "gh", "search", "prs", "--repo", repo, "--reviewed-by", authority,
+        "--sort", "updated", "--limit", str(limit), "--json", "number,title",
+    ])
+    return json.loads(out)
 
 
-def fetch_reviews(repo, states):
-    """Yield (review_dict, pr_number, pr_title) for reviews with a non-empty body."""
-    for number, title in fetch_pull_numbers(repo, states):
+def fetch_reviews(repo, authorities, limit):
+    """Yield (review_dict, pr_number, pr_title) for reviews with a non-empty body,
+    across the deduped union of PRs reviewed by any authority (each capped at
+    `limit`, newest-first). A search that fails for one authority is skipped."""
+    titles = {}
+    for authority in authorities:
+        try:
+            for pr in search_reviewed_prs(repo, authority, limit):
+                titles.setdefault(pr["number"], pr.get("title", ""))
+        except GhError as e:
+            print(f"  ! review search failed for {repo} reviewed-by:{authority}: {e}",
+                  file=sys.stderr)
+    for number, title in titles.items():
         for review in gh_api_items(f"repos/{repo}/pulls/{number}/reviews?per_page=100"):
             if (review.get("body") or "").strip():
                 yield review, number, title
@@ -439,10 +458,10 @@ def harvest_repo(repo_cfg, config):
                 kind, repo, c["user"]["login"], c["created_at"],
                 c["html_url"], c["body"], context=c.get("issue_url", "")))
 
-    # Review summaries (thorough)
+    # Review summaries (targeted via search, capped per authority)
     if defaults.get("harvest_reviews", True):
-        states = defaults.get("review_pr_states", ["closed"])
-        for review, number, title in github.fetch_reviews(repo, states):
+        limit = defaults.get("review_pr_limit", 250)
+        for review, number, title in github.fetch_reviews(repo, sorted(allowed), limit):
             author = (review.get("user") or {}).get("login")
             if is_authority(author, allowed) and is_substantive(review.get("body")):
                 records.append(shape_record(
@@ -476,6 +495,8 @@ def main(argv=None):
     ap.add_argument("--repo", action="append", help="limit to this repo (repeatable)")
     ap.add_argument("--suggest-authorities", metavar="REPO")
     ap.add_argument("--out-dir", default="corpus")
+    ap.add_argument("--review-limit", type=int, default=None,
+                    help="override defaults.review_pr_limit (PRs/authority scanned for review summaries)")
     args = ap.parse_args(argv)
 
     if args.suggest_authorities:
@@ -484,6 +505,8 @@ def main(argv=None):
         return 0
 
     config = load_config(args.config)
+    if args.review_limit is not None:
+        config.setdefault("defaults", {})["review_pr_limit"] = args.review_limit
     repos = config["repos"]
     if args.repo:
         wanted = set(args.repo)
@@ -510,12 +533,12 @@ if __name__ == "__main__":
 Run: `python -m ohf_principles.harvest --suggest-authorities music-assistant/server`
 Expected: a ranked list including `marcelveldt` and `MarvinSchenkel`, no `[bot]` entries.
 
-- [ ] **Step 4: Verify a real single-repo harvest**
+- [ ] **Step 4: Verify a real single-repo harvest (small review cap for speed)**
 
-Run: `python -m ohf_principles.harvest --repo music-assistant/server`
-Expected: prints `music-assistant/server: <N> records -> corpus/music-assistant__server.jsonl` with N > 0.
+Run: `python -m ohf_principles.harvest --repo music-assistant/server --review-limit 15`
+Expected: prints `music-assistant/server: <N> records -> corpus/music-assistant__server.jsonl` with N > 0. The `--review-limit 15` keeps the review-summary search fast (15 PRs/authority) while still exercising the review path end-to-end; the shipped default is 250.
 
-- [ ] **Step 5: Assert corpus integrity (authors in allowlist, valid JSON)**
+- [ ] **Step 5: Assert corpus integrity (authors in allowlist, valid JSON, review kind present)**
 
 Run:
 ```bash
@@ -526,15 +549,17 @@ cfg = load_config("config/sources.yaml")
 repo_cfg = next(r for r in cfg["repos"] if r["repo"] == "music-assistant/server")
 allowed = authorities_for(repo_cfg, cfg)
 n = 0
+kinds = {}
 with open("corpus/music-assistant__server.jsonl", encoding="utf-8") as f:
     for line in f:
         rec = json.loads(line)          # raises if invalid JSON
         assert rec["author"].lower() in allowed, rec["author"]
+        kinds[rec["kind"]] = kinds.get(rec["kind"], 0) + 1
         n += 1
-print("OK", n, "records; all authors in allowlist")
+print("OK", n, "records; all authors in allowlist; kinds:", kinds)
 PY
 ```
-Expected: `OK <N> records; all authors in allowlist`.
+Expected: `OK <N> records; all authors in allowlist; kinds: {...}` — the kinds dict should include `review_comment` and, given `--review-limit 15`, likely `review` (report the actual breakdown; a `review` count of 0 is acceptable only if no capped PR had an authority summary — note it if so).
 
 - [ ] **Step 6: Verify a `wont_support` record exists from the support repo**
 
