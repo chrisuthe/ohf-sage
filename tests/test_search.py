@@ -1,4 +1,4 @@
-from ohf_principles.search import score, search, _tokens
+from ohf_principles.search import score, search, _tokens, main
 
 
 def _rec(body, author="someone", plus=0, repo="music-assistant/server"):
@@ -45,3 +45,35 @@ def test_search_filters_and_ranks(tmp_path):
 
 def test_tokens_drops_short_and_punct():
     assert _tokens("Event-loop: a?") == ["event", "loop"]
+
+
+def test_main_falls_back_to_shipped_corpus_when_no_local_harvest(tmp_path, monkeypatch, capsys):
+    import json
+    monkeypatch.chdir(tmp_path)
+    # Create agent/ohf-sage-corpus.jsonl with one matching record
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    corpus_file = agent_dir / "ohf-sage-corpus.jsonl"
+    rec = _rec("event loop blocking", author="marcelveldt")
+    corpus_file.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    # No corpus/ directory exists
+    # Run main with default corpus (no --corpus arg)
+    result = main(["event"])
+    assert result == 0, f"main() returned {result}, expected 0"
+    captured = capsys.readouterr()
+    # Verify output contains a hit
+    assert "[marcelveldt]" in captured.out, f"expected author in output, got: {captured.out}"
+    assert "event loop blocking" in captured.out or "blocking" in captured.out, f"expected snippet in output, got: {captured.out}"
+
+
+def test_main_returns_1_when_explicit_corpus_glob_has_no_matches(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    # Create a valid corpus file but search for something not in it
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    # No files in corpus/ that match the glob
+    # Use an explicit --corpus glob that matches nothing
+    result = main(["event", "--corpus", "nonexistent/*.jsonl"])
+    assert result == 1, f"main() returned {result}, expected 1"
+    captured = capsys.readouterr()
+    assert "no corpus files match" in captured.err, f"expected error message, got: {captured.err}"

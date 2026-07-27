@@ -56,12 +56,18 @@ def main(argv=None):
     ap.add_argument("--repo")
     ap.add_argument("--author")
     ap.add_argument("--top", type=int, default=10)
-    ap.add_argument("--corpus", default="corpus/*.jsonl",
-                    help="glob for corpus JSONL files (default: corpus/*.jsonl)")
+    ap.add_argument("--corpus", default=None,
+                    help="glob for corpus JSONL files (default: corpus/*.jsonl, then agent/ohf-sage-corpus.jsonl)")
     args = ap.parse_args(argv)
-    paths = sorted(glob.glob(args.corpus))
+    if args.corpus is None:
+        paths = sorted(glob.glob("corpus/*.jsonl")) or sorted(glob.glob("agent/ohf-sage-corpus.jsonl"))
+    else:
+        paths = sorted(glob.glob(args.corpus))
     if not paths:
-        print(f"no corpus files match {args.corpus}", file=sys.stderr)
+        if args.corpus is None:
+            print(f"no corpus files match corpus/*.jsonl or agent/ohf-sage-corpus.jsonl", file=sys.stderr)
+        else:
+            print(f"no corpus files match {args.corpus}", file=sys.stderr)
         return 1
     hits = search(paths, args.query, repo=args.repo, author=args.author, top=args.top)
     for i, r in enumerate(hits, 1):
