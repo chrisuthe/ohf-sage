@@ -91,3 +91,52 @@ def not_planned_issue_numbers(repo):
         if issue.get("pull_request") is None and issue.get("state_reason") == "not_planned":
             nums.add(issue["number"])
     return nums
+
+
+def fetch_file(repo, path):
+    """Raw text of a file in the repo's default branch, or None if it 404s."""
+    try:
+        return _run(["gh", "api", f"repos/{repo}/contents/{path}",
+                     "-H", "Accept: application/vnd.github.raw"])
+    except GhError:
+        return None
+
+
+_REVIEW_THREADS_QUERY = (
+    "query($owner:String!,$name:String!,$num:Int!){"
+    "repository(owner:$owner,name:$name){"
+    "pullRequest(number:$num){"
+    "reviewThreads(first:100){nodes{isResolved comments(first:50){nodes{url}}}}}}}"
+)
+
+
+def _resolved_urls_from_graphql(data):
+    urls = set()
+    repo = (((data or {}).get("data") or {}).get("repository") or {})
+    pr = repo.get("pullRequest") or {}
+    threads = (pr.get("reviewThreads") or {}).get("nodes") or []
+    for th in threads:
+        if th and th.get("isResolved"):
+            for c in (th.get("comments") or {}).get("nodes") or []:
+                if c and c.get("url"):
+                    urls.add(c["url"])
+    return urls
+
+
+def resolved_comment_urls(repo, pr_numbers):
+    """Set of review-comment html_urls that sit in a resolved thread, across the PRs.
+
+    Per-PR GraphQL failures are logged and skipped."""
+    owner, name = repo.split("/", 1)
+    resolved = set()
+    for num in pr_numbers:
+        try:
+            out = _run(["gh", "api", "graphql",
+                        "-f", "query=" + _REVIEW_THREADS_QUERY,
+                        "-f", "owner=" + owner, "-f", "name=" + name,
+                        "-F", "num=" + str(num)])
+        except GhError as e:
+            print(f"  ! reviewThreads query failed for {repo}#{num}: {e}", file=sys.stderr)
+            continue
+        resolved |= _resolved_urls_from_graphql(json.loads(out))
+    return resolved
