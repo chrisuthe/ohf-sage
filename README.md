@@ -1,4 +1,4 @@
-# OHF Principles Advisor
+# OHF Sage
 
 A Claude Code agent that knows the **Open Home Foundation / Music Assistant**
 project leads' engineering principles — mined from real PR reviews and rejected
@@ -21,13 +21,13 @@ standards, it applies ones on record. **Home Assistant is out of scope.**
 
 ## Install
 
-You only need one file: **`agent/ohf-principles-advisor.md`**.
+You only need one file: **`agent/ohf-sage.md`**.
 
 **One project** (recommended) — from a clone of this repo:
 
 ```bash
-git clone https://github.com/chrisuthe/ohf-principal.git
-cd ohf-principal
+git clone https://github.com/chrisuthe/ohf-sage.git
+cd ohf-sage
 python scripts/install.py /path/to/your/project
 ```
 
@@ -36,15 +36,15 @@ That drops the agent into `/path/to/your/project/.claude/agents/`.
 **Everywhere** (all your projects) — copy it into your user-level agents folder:
 
 ```bash
-mkdir -p ~/.claude/agents && cp agent/ohf-principles-advisor.md ~/.claude/agents/
+mkdir -p ~/.claude/agents && cp agent/ohf-sage.md ~/.claude/agents/
 ```
 
 **No clone** — pull just the agent file into a project:
 
 ```bash
 mkdir -p .claude/agents
-curl -L -o .claude/agents/ohf-principles-advisor.md \
-  https://raw.githubusercontent.com/chrisuthe/ohf-principal/master/agent/ohf-principles-advisor.md
+curl -L -o .claude/agents/ohf-sage.md \
+  https://raw.githubusercontent.com/chrisuthe/ohf-sage/master/agent/ohf-sage.md
 ```
 
 **Contributing to a repo you don't own** (e.g. a Music Assistant fork)? Add
@@ -63,8 +63,8 @@ file copies; only `install.py` uses Python (3.9+).
 
 Once installed, ask Claude Code to bring it in. Example prompts:
 
-- "Run this approach past the **ohf-principles-advisor** before I build it."
-- "Have the **ohf-principles-advisor** review my diff."
+- "Run this approach past the **ohf-sage** before I build it."
+- "Have the **ohf-sage** review my diff."
 - "I want to add a music provider that caches streamed audio to disk — check it
   against the project principles first."
 

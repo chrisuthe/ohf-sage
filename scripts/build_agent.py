@@ -28,9 +28,9 @@ def build_agent(template_path, principles_path, out_path):
 def main(argv=None):
     argv = argv or sys.argv[1:]
     root = Path(__file__).resolve().parents[1]
-    template = argv[0] if len(argv) > 0 else root / "agent/ohf-principles-advisor.template.md"
+    template = argv[0] if len(argv) > 0 else root / "agent/ohf-sage.template.md"
     principles = argv[1] if len(argv) > 1 else root / "principles/principles.md"
-    out = argv[2] if len(argv) > 2 else root / "agent/ohf-principles-advisor.md"
+    out = argv[2] if len(argv) > 2 else root / "agent/ohf-sage.md"
     build_agent(template, principles, out)
     print(f"wrote {out}")
     return 0
