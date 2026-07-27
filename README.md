@@ -59,6 +59,21 @@ More detail and platform-specific (PowerShell) commands: [INSTALL.md](INSTALL.md
 You don't need Python just to *use* the agent — the copy/`curl` routes are plain
 file copies; only `install.py` uses Python (3.9+).
 
+### Full local setup (skills + CLIs across all your repos)
+
+The drop-in agent works on its own. To *also* use the **`add-manual-principle`** /
+**`propose-principle-upstream`** skills and the `search` / `capture` CLIs from **any**
+repo — not just this checkout — do this one-time setup from a clone:
+
+```bash
+pip install -e .   # makes `ohf_principles` importable everywhere (+ ohf-sage-search / ohf-sage-capture commands)
+cp -r .claude/skills/add-manual-principle .claude/skills/propose-principle-upstream ~/.claude/skills/
+```
+
+Then install the agent into each repo you work in (see **Install** above). Paste-mode
+capture needs neither step; only the GitHub-URL capture mode and the `search` / `capture`
+CLIs require the `pip install -e`.
+
 ## Using it
 
 Once installed, ask Claude Code to bring it in. Example prompts:
@@ -101,7 +116,8 @@ knows — weigh its confidence accordingly:
 
 ## Adding out-of-band guidance
 
-You can add your own principles locally without updating the shipped corpus:
+You can add your own principles locally without updating the shipped corpus. (The
+skills below need the one-time [Full local setup](#full-local-setup-skills--clis-across-all-your-repos).)
 
 - Run the **`add-manual-principle`** skill to capture a principle from a paste
   (Slack message, verbal note) — marked `[attested: who · channel · date]` — or
