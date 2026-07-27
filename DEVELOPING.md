@@ -23,6 +23,8 @@ This document is for refreshing the principles or mining additional repos.
 config/sources.yaml → harvest → corpus/ → distill-principles skill
     → principles/principles.md (human review) → build_agent.py
     → agent/ohf-sage.md → install.py
+                       ↓ build_corpus.py
+                   agent/ohf-sage-corpus.jsonl
 ```
 
 ### 1. Configure sources
@@ -77,7 +79,24 @@ from the 5000/hr core quota, and the endpoint that reports remaining quota won't
 warn you about them. The harvester retries with backoff on rate-limit errors,
 but a large unpaced run can still get throttled hard.
 
-### 4. Distill
+### 4. Build the corpus
+
+```
+python scripts/build_corpus.py
+```
+
+Merges `corpus/*.jsonl` (the harvested review comments) into the committed
+`agent/ohf-sage-corpus.jsonl` that ships with the agent. This file is used as a
+fallback when embedded rules don't cover a question — ohf-sage greps it to find
+real review comments.
+
+You can also query the corpus directly with the `search` CLI for ad-hoc queries:
+
+```
+python -m ohf_principles.search "<terms>" [--repo <owner/repo>] [--author <login>] [--top N]
+```
+
+### 5. Distill
 
 Run the `distill-principles` skill (`.claude/skills/distill-principles/`) in
 Claude Code. It reads `corpus/*.jsonl` (mined) and `corpus/authored/*`
@@ -88,14 +107,14 @@ layered `principles/principles.md` where every rule carries a provenance marker
 For a large corpus, chunk the mined records and fan the extraction out across
 agents, then synthesize — a single agent can't hold ~10k comments in context.
 
-### 5. Review the principles (required)
+### 6. Review the principles (required)
 
 `principles/principles.md` is the human checkpoint: read it, correct anything
 mis-clustered or mis-marked, drop anything that doesn't match how the leads
 actually think. Nothing downstream should ship until this file is reviewed —
 it's what goes out to your team and the public.
 
-### 6. Build the agent
+### 7. Build the agent
 
 ```
 python scripts/build_agent.py
