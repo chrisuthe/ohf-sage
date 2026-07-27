@@ -95,3 +95,41 @@ def test_harvest_repo_keeps_review_comments_when_issue_comments_fetch_fails(monk
     records = harvest.harvest_repo({"repo": "music-assistant/server", "authorities": []}, cfg)
     assert len(records) >= 1
     assert any(r["kind"] == "review_comment" and r["author"] == "marcelveldt" for r in records)
+
+
+from ohf_principles.harvest import harvest_authored, _authored_filename
+
+
+def test_authored_filename_sanitizes():
+    assert _authored_filename("music-assistant/server", ".github/copilot-instructions.md") \
+        == "music-assistant__server__.github__copilot-instructions.md"
+
+
+def test_harvest_authored_writes_present_files_only(tmp_path, monkeypatch):
+    from ohf_principles import github
+    def fake_fetch(repo, path):
+        return "CONTENT of " + path if path == "AGENTS.md" else None
+    monkeypatch.setattr(github, "fetch_file", fake_fetch)
+    cfg = {"defaults": {"authored_docs": ["AGENTS.md", "MISSING.md"], "config_files": []}}
+    written = harvest_authored({"repo": "music-assistant/server"}, cfg, str(tmp_path))
+    names = sorted(p.replace("\\", "/").split("/")[-1] for p in written)
+    assert names == ["music-assistant__server__AGENTS.md"]
+    body = open(written[0], encoding="utf-8").read()
+    assert body == "CONTENT of AGENTS.md"
+
+
+def test_harvest_repo_attaches_reactions(monkeypatch):
+    from ohf_principles import github, harvest
+    monkeypatch.setattr(github, "fetch_review_comments", lambda repo: [{
+        "user": {"login": "marcelveldt"}, "created_at": "t", "html_url": "u",
+        "pull_request_url": "https://api.github.com/repos/x/y/pulls/9",
+        "reactions": {"+1": 2, "total_count": 2},
+        "body": "Always re-use the existing global http session and never recreate it.",
+    }])
+    monkeypatch.setattr(github, "fetch_issue_comments", lambda repo: [])
+    monkeypatch.setattr(github, "not_planned_issue_numbers", lambda repo: set())
+    monkeypatch.setattr(github, "fetch_reviews", lambda *a, **k: [])
+    cfg = {"global_authorities": ["marcelveldt"], "defaults": {"harvest_reviews": False}}
+    recs = harvest.harvest_repo({"repo": "music-assistant/server", "authorities": []}, cfg)
+    assert recs[0]["reactions"] == {"plus": 2, "total": 2}
+    assert recs[0]["adopted"] is None

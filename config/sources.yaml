@@ -5,6 +5,14 @@ defaults:
   since: null            # ISO-8601 date (e.g. "2023-01-01") for incremental harvest; null = all history
   harvest_reviews: true  # also pull pulls/{n}/reviews summary bodies (slower, high signal)
   review_pr_limit: 250   # cap PRs-per-authority scanned for review summaries (newest first, via search)
+  with_threads: false                       # opt-in adoption detection (per-PR GraphQL)
+  authored_docs:                            # tried in every repo; 404s skipped
+    - AGENTS.md
+    - .github/copilot-instructions.md
+    - CONTRIBUTING.md
+  config_files:
+    - pyproject.toml
+    - .pre-commit-config.yaml
 
 repos:
   - repo: music-assistant/server
