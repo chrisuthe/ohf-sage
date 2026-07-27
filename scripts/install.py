@@ -78,7 +78,7 @@ def main(argv=None):
     root = Path(__file__).resolve().parents[1]
     ap = argparse.ArgumentParser(description="Install the advisor agent into a repo's .claude/agents/.")
     ap.add_argument("repo_dir")
-    ap.add_argument("--agent", default=str(root / "agent/ohf-principles-advisor.md"))
+    ap.add_argument("--agent", default=str(root / "agent/ohf-sage.md"))
     ap.add_argument("--local-exclude", action="store_true",
                     help="keep the installed agent out of the target repo's git tracking "
                          "via .git/info/exclude, without modifying .gitignore")

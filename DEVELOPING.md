@@ -4,7 +4,7 @@ This repo is also the **pipeline** that produces the advisor agent: it mines
 Open Home Foundation / Music Assistant PR reviews and rejected feature requests
 (plus maintainer-authored docs and tool configs), distills them into a cited,
 layered `principles/principles.md`, and builds that into the shipped
-`agent/ohf-principles-advisor.md`.
+`agent/ohf-sage.md`.
 
 Most people only need to **install and use** the agent — see [README.md](README.md).
 This document is for refreshing the principles or mining additional repos.
@@ -22,7 +22,7 @@ This document is for refreshing the principles or mining additional repos.
 ```
 config/sources.yaml → harvest → corpus/ → distill-principles skill
     → principles/principles.md (human review) → build_agent.py
-    → agent/ohf-principles-advisor.md → install.py
+    → agent/ohf-sage.md → install.py
 ```
 
 ### 1. Configure sources
@@ -101,9 +101,9 @@ it's what goes out to your team and the public.
 python scripts/build_agent.py
 ```
 
-Injects `principles/principles.md` into `agent/ohf-principles-advisor.template.md`
+Injects `principles/principles.md` into `agent/ohf-sage.template.md`
 between the `<!-- PRINCIPLES:START -->` / `<!-- PRINCIPLES:END -->` markers,
-producing `agent/ohf-principles-advisor.md` — the file people install.
+producing `agent/ohf-sage.md` — the file people install.
 
 Then install it (see [README.md](README.md#install)).
 
