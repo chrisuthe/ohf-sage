@@ -28,11 +28,14 @@ def harvest_repo(repo_cfg, config):
         return is_authority(author, allowed) and is_substantive(item.get("body"))
 
     # Inline review comments
-    for c in github.fetch_review_comments(repo):
-        if keep(c):
-            records.append(shape_record(
-                "review_comment", repo, c["user"]["login"], c["created_at"],
-                c["html_url"], c["body"], context=c.get("pull_request_url", "")))
+    try:
+        for c in github.fetch_review_comments(repo):
+            if keep(c):
+                records.append(shape_record(
+                    "review_comment", repo, c["user"]["login"], c["created_at"],
+                    c["html_url"], c["body"], context=c.get("pull_request_url", "")))
+    except github.GhError as e:
+        print(f"  ! review_comment harvest incomplete for {repo}: {e}", file=sys.stderr)
 
     # Rejected-feature issue numbers (for wont_support tagging)
     try:
@@ -42,13 +45,16 @@ def harvest_repo(repo_cfg, config):
         not_planned = set()
 
     # Issue + PR-thread comments
-    for c in github.fetch_issue_comments(repo):
-        if keep(c):
-            n = _issue_number(c.get("issue_url"))
-            kind = "wont_support" if n in not_planned else "issue_comment"
-            records.append(shape_record(
-                kind, repo, c["user"]["login"], c["created_at"],
-                c["html_url"], c["body"], context=c.get("issue_url", "")))
+    try:
+        for c in github.fetch_issue_comments(repo):
+            if keep(c):
+                n = _issue_number(c.get("issue_url"))
+                kind = "wont_support" if n in not_planned else "issue_comment"
+                records.append(shape_record(
+                    kind, repo, c["user"]["login"], c["created_at"],
+                    c["html_url"], c["body"], context=c.get("issue_url", "")))
+    except github.GhError as e:
+        print(f"  ! issue_comment harvest incomplete for {repo}: {e}", file=sys.stderr)
 
     # Review summaries (targeted via search, capped per authority)
     if defaults.get("harvest_reviews", True):

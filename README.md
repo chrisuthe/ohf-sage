@@ -27,7 +27,7 @@ OHF-Voice, Sendspin) can be added via `config/sources.yaml` once harvested.
 - [`gh`](https://cli.github.com/) (GitHub CLI), authenticated with at least
   `repo` scope (`gh auth login` / `gh auth status`) — used for every GitHub
   fetch, no direct API tokens needed.
-- Python 3.11+ with [`pyyaml`](https://pypi.org/project/PyYAML/) installed.
+- Python 3.9+ with [`pyyaml`](https://pypi.org/project/PyYAML/) installed.
 - `pytest`, if you want to run the test suite (`tests/`).
 
 ## Usage

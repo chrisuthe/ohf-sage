@@ -62,3 +62,36 @@ def test_harvest_repo_keeps_comments_when_reviews_fail(monkeypatch):
     assert len(records) == 1
     assert records[0]["kind"] == "review_comment"
     assert records[0]["author"] == "marcelveldt"
+
+
+def test_harvest_repo_keeps_records_when_review_comments_fetch_fails(monkeypatch):
+    def failing_review_comments(repo):
+        yield {"user": {"login": "marcelveldt"}, "created_at": "t",
+               "html_url": "u", "pull_request_url": "p",
+               "body": "Do not block the event loop in providers, ever please."}
+        raise GhError("secondary rate limit exceeded")
+    monkeypatch.setattr(github, "fetch_review_comments", failing_review_comments)
+    monkeypatch.setattr(github, "fetch_issue_comments", lambda repo: [])
+    monkeypatch.setattr(github, "not_planned_issue_numbers", lambda repo: set())
+    monkeypatch.setattr(github, "fetch_reviews", lambda repo, authorities, limit: [])
+    cfg = {"global_authorities": ["marcelveldt"], "defaults": {"harvest_reviews": True}}
+    records = harvest.harvest_repo({"repo": "music-assistant/server", "authorities": []}, cfg)
+    assert len(records) == 1
+    assert records[0]["kind"] == "review_comment"
+    assert records[0]["author"] == "marcelveldt"
+
+
+def test_harvest_repo_keeps_review_comments_when_issue_comments_fetch_fails(monkeypatch):
+    monkeypatch.setattr(github, "fetch_review_comments",
+                        lambda repo: [{"user": {"login": "marcelveldt"}, "created_at": "t",
+                                       "html_url": "u", "pull_request_url": "p",
+                                       "body": "Do not block the event loop in providers, ever please."}])
+    def failing_issue_comments(repo):
+        raise GhError("secondary rate limit exceeded")
+    monkeypatch.setattr(github, "fetch_issue_comments", failing_issue_comments)
+    monkeypatch.setattr(github, "not_planned_issue_numbers", lambda repo: set())
+    monkeypatch.setattr(github, "fetch_reviews", lambda repo, authorities, limit: [])
+    cfg = {"global_authorities": ["marcelveldt"], "defaults": {"harvest_reviews": True}}
+    records = harvest.harvest_repo({"repo": "music-assistant/server", "authorities": []}, cfg)
+    assert len(records) >= 1
+    assert any(r["kind"] == "review_comment" and r["author"] == "marcelveldt" for r in records)
