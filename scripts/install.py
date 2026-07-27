@@ -79,16 +79,26 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Install the advisor agent into a repo's .claude/agents/.")
     ap.add_argument("repo_dir")
     ap.add_argument("--agent", default=str(root / "agent/ohf-sage.md"))
+    ap.add_argument("--corpus", default=str(root / "agent/ohf-sage-corpus.jsonl"),
+                    help="review-history corpus shipped alongside the agent for retrieval")
+    ap.add_argument("--no-corpus", action="store_true",
+                    help="install the agent only, without the retrieval corpus")
     ap.add_argument("--local-exclude", action="store_true",
-                    help="keep the installed agent out of the target repo's git tracking "
+                    help="keep the installed files out of the target repo's git tracking "
                          "via .git/info/exclude, without modifying .gitignore")
     args = ap.parse_args(argv)
-    dest = install(args.agent, args.repo_dir)
-    print(f"installed -> {dest}")
+
+    installed = [install(args.agent, args.repo_dir)]
+    corpus_path = Path(args.corpus)
+    if not args.no_corpus and corpus_path.is_file():
+        installed.append(install(str(corpus_path), args.repo_dir))
+    for dest in installed:
+        print(f"installed -> {dest}")
     if args.local_exclude:
-        exclude_path = add_local_exclude(args.repo_dir, dest)
-        if exclude_path:
-            print(f"excluded -> {exclude_path}")
+        for dest in installed:
+            exclude_path = add_local_exclude(args.repo_dir, dest)
+            if exclude_path:
+                print(f"excluded -> {dest.name}")
     return 0
 
 

@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from install import add_local_exclude  # noqa: E402
+from install import add_local_exclude, main  # noqa: E402
 
 
 def test_local_exclude_appends_once_for_plain_git_dir(tmp_path):
@@ -47,3 +47,31 @@ def test_local_exclude_skips_non_git_dir(tmp_path):
     dest = repo / ".claude" / "agents" / "ohf-sage.md"
 
     assert add_local_exclude(repo, dest) is None
+
+
+def test_install_ships_corpus_alongside_agent(tmp_path):
+    agent = tmp_path / "ohf-sage.md"
+    agent.write_text("AGENT", encoding="utf-8")
+    corpus = tmp_path / "ohf-sage-corpus.jsonl"
+    corpus.write_text('{"body":"x"}\n', encoding="utf-8")
+    repo = tmp_path / "repo"
+    (repo / ".git" / "info").mkdir(parents=True)
+
+    main([str(repo), "--agent", str(agent), "--corpus", str(corpus)])
+
+    assert (repo / ".claude" / "agents" / "ohf-sage.md").exists()
+    assert (repo / ".claude" / "agents" / "ohf-sage-corpus.jsonl").exists()
+
+
+def test_no_corpus_installs_agent_only(tmp_path):
+    agent = tmp_path / "ohf-sage.md"
+    agent.write_text("AGENT", encoding="utf-8")
+    corpus = tmp_path / "ohf-sage-corpus.jsonl"
+    corpus.write_text('{"body":"x"}\n', encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    main([str(repo), "--agent", str(agent), "--corpus", str(corpus), "--no-corpus"])
+
+    assert (repo / ".claude" / "agents" / "ohf-sage.md").exists()
+    assert not (repo / ".claude" / "agents" / "ohf-sage-corpus.jsonl").exists()
