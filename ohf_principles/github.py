@@ -26,7 +26,6 @@ def _run(args, retries=4):
             time.sleep(wait)
             continue
         raise GhError(stderr or f"gh failed: {' '.join(args)}")
-    raise GhError(f"gh failed after {retries} attempts: {' '.join(args)}")
 
 
 def gh_api_items(path):
