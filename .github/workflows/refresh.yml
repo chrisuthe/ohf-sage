@@ -44,7 +44,12 @@ jobs:
       - name: Detect manifest change
         id: diff
         run: |
-          if git diff --quiet -- corpus-manifest.json; then
+          git show HEAD:corpus-manifest.json 2>/dev/null \
+            | python -c "import json,sys; d=json.load(sys.stdin); d.pop('generated',None); print(json.dumps(d,sort_keys=True))" \
+            > /tmp/old.json || echo '{}' > /tmp/old.json
+          python -c "import json; d=json.load(open('corpus-manifest.json')); d.pop('generated',None); print(json.dumps(d,sort_keys=True))" \
+            > /tmp/new.json
+          if diff -q /tmp/old.json /tmp/new.json > /dev/null; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
