@@ -3,7 +3,31 @@ import argparse
 import os
 import re
 import shutil
+import sys
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
+
+
+_RELEASE_REPO = "chrisuthe/ohf-sage"
+_RELEASE_ASSETS = ["ohf-sage.md", "ohf-sage-corpus.jsonl"]
+
+
+def release_asset_url(repo, asset):
+    return f"https://github.com/{repo}/releases/latest/download/{asset}"
+
+
+def download_release_assets(repo, dest_dir):
+    """Download the release assets into dest_dir; return local paths. Raises on failure."""
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for asset in _RELEASE_ASSETS:
+        dest = dest_dir / asset
+        urllib.request.urlretrieve(release_asset_url(repo, asset), dest)
+        paths.append(dest)
+    return paths
 
 
 def install(agent_path, repo_dir):
@@ -83,10 +107,24 @@ def main(argv=None):
                     help="review-history corpus shipped alongside the agent for retrieval")
     ap.add_argument("--no-corpus", action="store_true",
                     help="install the agent only, without the retrieval corpus")
+    ap.add_argument("--from-release", action="store_true",
+                    help="download the agent + corpus from the latest GitHub release instead of local files")
+    ap.add_argument("--release-repo", default=_RELEASE_REPO,
+                    help="owner/repo to pull the release from (default: chrisuthe/ohf-sage)")
     ap.add_argument("--local-exclude", action="store_true",
                     help="keep the installed files out of the target repo's git tracking "
                          "via .git/info/exclude, without modifying .gitignore")
     args = ap.parse_args(argv)
+
+    if args.from_release:
+        try:
+            fetched = download_release_assets(args.release_repo, tempfile.mkdtemp(prefix="ohf-sage-rel-"))
+        except (urllib.error.URLError, OSError) as e:
+            print(f"error: could not download release assets from {args.release_repo}: {e}", file=sys.stderr)
+            return 1
+        by_name = {p.name: str(p) for p in fetched}
+        args.agent = by_name["ohf-sage.md"]
+        args.corpus = by_name["ohf-sage-corpus.jsonl"]
 
     installed = [install(args.agent, args.repo_dir)]
     corpus_path = Path(args.corpus)
