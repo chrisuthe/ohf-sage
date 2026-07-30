@@ -1,0 +1,92 @@
+name: Refresh corpus
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      review_limit:
+        description: "PRs per authority to scan for review summaries"
+        default: "15"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REVIEW_LIMIT: ${{ github.event.inputs.review_limit || '15' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package
+        run: pip install -e .
+      - name: Harvest (paced)
+        run: |
+          set -e
+          repos=$(python -c "from ohf_principles.config import load_config; print('\n'.join(r['repo'] for r in load_config('config/sources.yaml')['repos']))")
+          while IFS= read -r repo; do
+            [ -z "$repo" ] && continue
+            echo "=== $repo ==="
+            python -m ohf_principles.harvest --repo "$repo" --review-limit "$REVIEW_LIMIT" || echo "  (skipped $repo)"
+            sleep 12
+          done <<< "$repos"
+      - name: Build corpus, manifest, agent
+        run: |
+          python scripts/build_corpus.py
+          python scripts/build_manifest.py
+          python scripts/build_agent.py
+      - name: Guard against catastrophic corpus shrink
+        run: |
+          old=$(git show HEAD:corpus-manifest.json 2>/dev/null \
+            | python -c "import json,sys; print(json.load(sys.stdin).get('total',0))" || echo 0)
+          new=$(python -c "import json; print(json.load(open('corpus-manifest.json')).get('total',0))")
+          echo "corpus total: old=$old new=$new"
+          if [ "$new" -eq 0 ]; then
+            echo "::error::refresh produced an empty corpus (total=0) - harvest likely failed; refusing to publish."
+            exit 1
+          fi
+          if [ "$old" -gt 0 ] && [ "$new" -lt $((old / 2)) ]; then
+            echo "::error::corpus dropped from $old to $new (>50%) - likely a harvest failure; refusing to publish."
+            exit 1
+          fi
+      - name: Detect manifest change
+        id: diff
+        run: |
+          git show HEAD:corpus-manifest.json 2>/dev/null \
+            | python -c "import json,sys; d=json.load(sys.stdin); d.pop('generated',None); print(json.dumps(d,sort_keys=True))" \
+            > /tmp/old.json || echo '{}' > /tmp/old.json
+          python -c "import json; d=json.load(open('corpus-manifest.json')); d.pop('generated',None); print(json.dumps(d,sort_keys=True))" \
+            > /tmp/new.json
+          if diff -q /tmp/old.json /tmp/new.json > /dev/null; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish prerelease with assets
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          tag="corpus-$(date +%Y%m%d-%H%M%S)"
+          gh release create "$tag" --prerelease \
+            --title "Corpus refresh $tag" \
+            --notes-file corpus-manifest.json \
+            agent/ohf-sage.md agent/ohf-sage-corpus.jsonl
+      - name: Open manifest PR
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          add-paths: corpus-manifest.json
+          branch: corpus-refresh
+          delete-branch: true
+          commit-message: "Refresh corpus manifest"
+          title: "Corpus refresh"
+          body: |
+            Automated corpus refresh. Review the per-repo record deltas in `corpus-manifest.json`.
+
+            The rebuilt corpus + agent are staged as the newest `corpus-*` **prerelease**;
+            merging this PR promotes them to the `latest` Release (see `publish.yml`).

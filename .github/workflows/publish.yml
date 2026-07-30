@@ -1,0 +1,27 @@
+name: Publish release
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - corpus-manifest.json
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Promote newest corpus prerelease to latest
+        run: |
+          tag=$(gh release list --limit 30 --json tagName,isPrerelease \
+            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("corpus-")))][0].tagName')
+          if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+            echo "no corpus prerelease to promote"; exit 0
+          fi
+          gh release edit "$tag" --prerelease=false --latest
+          echo "promoted $tag to latest"

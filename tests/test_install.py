@@ -75,3 +75,41 @@ def test_no_corpus_installs_agent_only(tmp_path):
 
     assert (repo / ".claude" / "agents" / "ohf-sage.md").exists()
     assert not (repo / ".claude" / "agents" / "ohf-sage-corpus.jsonl").exists()
+
+
+def test_release_asset_url():
+    from install import release_asset_url
+    assert release_asset_url("chrisuthe/ohf-sage", "ohf-sage.md") == \
+        "https://github.com/chrisuthe/ohf-sage/releases/latest/download/ohf-sage.md"
+
+
+def test_from_release_installs_downloaded_assets(tmp_path, monkeypatch):
+    import install as inst
+    # stub the network: "download" writes local placeholder files
+    def fake_urlretrieve(url, dest):
+        Path(dest).write_text("DOWNLOADED " + url, encoding="utf-8")
+        return dest, None
+    monkeypatch.setattr(inst.urllib.request, "urlretrieve", fake_urlretrieve)
+    repo = tmp_path / "repo"; (repo / ".git" / "info").mkdir(parents=True)
+    inst.main([str(repo), "--from-release"])
+    assert (repo / ".claude" / "agents" / "ohf-sage.md").exists()
+    assert (repo / ".claude" / "agents" / "ohf-sage-corpus.jsonl").exists()
+
+
+def test_from_release_reports_failure(tmp_path, monkeypatch, capsys):
+    import install as inst
+    def boom(url, dest):
+        raise inst.urllib.error.URLError("no network")
+    monkeypatch.setattr(inst.urllib.request, "urlretrieve", boom)
+    repo = tmp_path / "repo"; repo.mkdir()
+    rc = inst.main([str(repo), "--from-release"])
+    assert rc == 1
+    assert "could not download" in capsys.readouterr().err.lower()
+
+
+def test_note_when_corpus_absent(tmp_path, capsys):
+    import install as inst
+    agent = tmp_path / "ohf-sage.md"; agent.write_text("A", encoding="utf-8")
+    repo = tmp_path / "repo"; repo.mkdir()
+    inst.main([str(repo), "--agent", str(agent), "--corpus", str(tmp_path / "nope.jsonl")])
+    assert "no local corpus" in capsys.readouterr().err.lower()
