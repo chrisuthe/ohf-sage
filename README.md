@@ -21,9 +21,19 @@ standards, it applies ones on record. **Home Assistant is out of scope.**
 
 ## Install
 
-You only need one file: **`agent/ohf-sage.md`**.
+You only need one file: **`agent/ohf-sage.md`** (plus the corpus for fallback review history).
 
-**One project** (recommended) — from a clone of this repo:
+**Get the latest** (recommended) — pull from the latest release:
+
+```bash
+python scripts/install.py /path/to/your/project --from-release
+```
+
+That drops the agent and corpus into `/path/to/your/project/.claude/agents/`. The corpus
+is published via GitHub Releases (refreshed weekly by CI), not committed to git — so
+`--from-release` always gets the newest.
+
+**One project** — from a clone of this repo:
 
 ```bash
 git clone https://github.com/chrisuthe/ohf-sage.git
@@ -39,12 +49,14 @@ That drops the agent into `/path/to/your/project/.claude/agents/`.
 mkdir -p ~/.claude/agents && cp agent/ohf-sage.md ~/.claude/agents/
 ```
 
-**No clone** — pull just the agent file into a project:
+**No clone** — pull just the agent and corpus files into a project:
 
 ```bash
 mkdir -p .claude/agents
 curl -L -o .claude/agents/ohf-sage.md \
-  https://raw.githubusercontent.com/chrisuthe/ohf-sage/master/agent/ohf-sage.md
+  https://github.com/chrisuthe/ohf-sage/releases/latest/download/ohf-sage.md
+curl -L -o .claude/agents/ohf-sage-corpus.jsonl \
+  https://github.com/chrisuthe/ohf-sage/releases/latest/download/ohf-sage-corpus.jsonl
 ```
 
 **Contributing to a repo you don't own** (e.g. a Music Assistant fork)? Add
