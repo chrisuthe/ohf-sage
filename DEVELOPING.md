@@ -85,8 +85,8 @@ but a large unpaced run can still get throttled hard.
 python scripts/build_corpus.py
 ```
 
-Merges `corpus/*.jsonl` (the harvested review comments) into the committed
-`agent/ohf-sage-corpus.jsonl` that ships with the agent. This file is used as a
+Merges `corpus/*.jsonl` (the harvested review comments) into
+`agent/ohf-sage-corpus.jsonl`, which is built locally and shipped via GitHub Releases. This file is used as a
 fallback when embedded rules don't cover a question — ohf-sage greps it to find
 real review comments.
 
@@ -144,7 +144,7 @@ The corpus and principles are refreshed regularly without requiring a new checko
 
 - `.github/workflows/refresh.yml` runs weekly on a schedule: it re-harvests from the
   configured repos, rebuilds the corpus, and opens a pull request that touches only
-  `corpus-manifest.json` (a timestamp + hash of the corpus contents).
+  `corpus-manifest.json` (a timestamp plus per-repo record counts, and the total).
 - On merge, `.github/workflows/publish.yml` promotes the prerelease to the `latest`
   Release, making the new corpus available via `--from-release` / `releases/latest/download` URLs.
 - Users installing via `--from-release` or the `curl` routes always get the newest corpus
@@ -154,14 +154,15 @@ The corpus and principles are refreshed regularly without requiring a new checko
 
 - Refreshing the principles is a local step — CI never runs Claude. To update them:
   1. Re-harvest: run `python -m ohf_principles.harvest` to fetch new review comments.
-  2. Distill: run the `distill-principles` skill to cluster and extract rules from the
-     newly harvested corpus and authored sources.
-  3. Review: read `principles/principles.md`, correct mis-clusters, verify provenance markers.
-  4. Build: run `python scripts/build_agent.py` to inject the updated principles into
+  2. Distill: run the full distillation — chunk the corpus and fan extraction out across
+     agents, then synthesize and run a critic pass (a single agent can't hold ~10k comments) —
+     then human-review `principles/principles.md`, verify provenance markers, and correct
+     any mis-clusters.
+  3. Build: run `python scripts/build_agent.py` to inject the updated principles into
      the agent template.
-  5. Test & commit: run the test suite, open a PR with the new `principles/principles.md`
+  4. Test & commit: run the test suite, open a PR with the new `principles/principles.md`
      and rebuilt `agent/ohf-sage.md`.
-- On merge to `main`, the next automated corpus refresh bundles the new agent into the
+- On merge to `master`, the next automated corpus refresh bundles the new agent into the
   release.
 
 ## Tests

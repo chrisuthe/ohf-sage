@@ -68,7 +68,7 @@ Ask Claude Code things like:
 - "Run this approach past the ohf-sage before I build it."
 - "Have the ohf-sage review my diff."
 
-Requirements: Claude Code. No Python needed just to *use* the agent — the install scripts use Python 3.9+, but Option B / the `curl` route are plain file copies.
+Requirements: Claude Code. No Python needed just to *use* the agent — only `install.py` (any of the `install.py` routes, incl. `--from-release`) uses Python 3.9+; the plain `cp`/`curl` copy routes need no Python.
 
 ---
 
