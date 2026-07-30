@@ -105,3 +105,11 @@ def test_from_release_reports_failure(tmp_path, monkeypatch, capsys):
     rc = inst.main([str(repo), "--from-release"])
     assert rc == 1
     assert "could not download" in capsys.readouterr().err.lower()
+
+
+def test_note_when_corpus_absent(tmp_path, capsys):
+    import install as inst
+    agent = tmp_path / "ohf-sage.md"; agent.write_text("A", encoding="utf-8")
+    repo = tmp_path / "repo"; repo.mkdir()
+    inst.main([str(repo), "--agent", str(agent), "--corpus", str(tmp_path / "nope.jsonl")])
+    assert "no local corpus" in capsys.readouterr().err.lower()

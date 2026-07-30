@@ -137,6 +137,9 @@ def main(argv=None):
             exclude_path = add_local_exclude(args.repo_dir, dest)
             if exclude_path:
                 print(f"excluded -> {dest.name}")
+    if not args.no_corpus and not args.from_release and not corpus_path.is_file():
+        print("note: no local corpus found; installed the agent only. "
+              "Run with --from-release to also fetch the review-history corpus.", file=sys.stderr)
     return 0
 
 

@@ -41,6 +41,20 @@ jobs:
           python scripts/build_corpus.py
           python scripts/build_manifest.py
           python scripts/build_agent.py
+      - name: Guard against catastrophic corpus shrink
+        run: |
+          old=$(git show HEAD:corpus-manifest.json 2>/dev/null \
+            | python -c "import json,sys; print(json.load(sys.stdin).get('total',0))" || echo 0)
+          new=$(python -c "import json; print(json.load(open('corpus-manifest.json')).get('total',0))")
+          echo "corpus total: old=$old new=$new"
+          if [ "$new" -eq 0 ]; then
+            echo "::error::refresh produced an empty corpus (total=0) - harvest likely failed; refusing to publish."
+            exit 1
+          fi
+          if [ "$old" -gt 0 ] && [ "$new" -lt $((old / 2)) ]; then
+            echo "::error::corpus dropped from $old to $new (>50%) - likely a harvest failure; refusing to publish."
+            exit 1
+          fi
       - name: Detect manifest change
         id: diff
         run: |
