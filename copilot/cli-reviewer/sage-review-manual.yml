@@ -16,6 +16,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  copilot-requests: write   # org-billed Copilot inference via the built-in token (org-owned repos)
 
 jobs:
   sage-review:
@@ -54,11 +55,13 @@ jobs:
 
       - name: Sage review via Copilot CLI
         env:
-          # The musicassistant-bot token. This assumes the bot is entitled to call the Copilot
-          # model backend. If THIS STEP fails on auth, the app installation token is NOT
-          # Copilot-licensed — swap in a Copilot-seated token here instead:
+          # Model access: with `copilot-requests: write` (permissions above), the runner's built-in
+          # ephemeral token authenticates Copilot inference and billing flows to the ORG's Copilot
+          # plan — NO seat PAT, NOT the bot token. REQUIRES an ORG-OWNED repo (music-assistant/server)
+          # with the org's Copilot policy enabled + AI-credit budget.
+          # On a personal fork this won't bill the org — set a Copilot-SEATED PAT here instead:
           #   COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          COPILOT_GITHUB_TOKEN: ${{ steps.bot.outputs.token }}
+          COPILOT_GITHUB_TOKEN: ${{ github.token }}
           # Set repo/org variable SAGE_MODEL to your exact Claude id (`copilot` -> /model to list).
           SAGE_MODEL: ${{ vars.SAGE_MODEL || 'claude-opus-4.8' }}
         run: |
