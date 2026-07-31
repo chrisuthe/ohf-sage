@@ -1,8 +1,10 @@
 """Post OHF Sage findings (the JSON array Copilot CLI printed to stdout) as a PR review.
 
+Clearly labeled as an automated AI review. Falls back: inline review -> summary-only review ->
+plain PR comment (so it also works on closed/merged PRs while testing).
+
 Env: REPO=owner/name, PR_NUMBER=<n>, GH_TOKEN with pull-requests:write.
 Usage: python sage_post_review.py findings.json
-Findings anchored to a real diff line become inline comments; the rest go in the summary.
 """
 import json
 import os
@@ -11,6 +13,12 @@ import subprocess
 import sys
 
 SEV = {"CRITICAL": 0, "PROBLEM": 1, "SUGGESTION": 2}
+HEADER = (
+    "## 🤖 OHF Sage — automated principle review\n\n"
+    "_Automated review by **OHF Sage**, applying the project leads' engineering principles mined "
+    "from past PR reviews. AI-generated — a maintainer has the final say; treat findings as you "
+    "would any review comment. Each finding links the original PR discussion behind the rule._\n"
+)
 
 
 def gh(args, inp=None):
@@ -42,12 +50,12 @@ def summary_line(f):
 
 def main():
     repo, pr = os.environ["REPO"], os.environ["PR_NUMBER"]
-    raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
-    findings = sorted(extract_findings(raw), key=lambda f: SEV.get(f.get("severity"), 3))
+    findings = sorted(extract_findings(open(sys.argv[1], encoding="utf-8", errors="replace").read()),
+                      key=lambda f: SEV.get(f.get("severity"), 3))
 
-    header = ["## OHF Sage review", "",
-              (f"{len(findings)} finding(s) against the project leads' cited principles."
-               if findings else "No principle violations found."), ""]
+    intro = [HEADER, "",
+             (f"**{len(findings)} finding(s)** against the cited principles."
+              if findings else "No principle violations found."), ""]
 
     comments, overflow = [], []
     for f in findings:
@@ -59,23 +67,35 @@ def main():
         else:
             overflow.append(summary_line(f))
 
-    body = header + (["### Not anchored to diff lines", *overflow] if overflow else [])
+    review_body = "\n".join(intro + (["### Notes (not anchored to diff lines)", *overflow]
+                                     if overflow else []))
+    summary_only = "\n".join(intro + [summary_line(f) for f in findings])
 
-    def post(payload):
+    def review(payload):
         gh(["api", f"repos/{repo}/pulls/{pr}/reviews", "-X", "POST", "--input", "-"],
            inp=json.dumps(payload))
 
-    payload = {"body": "\n".join(body), "event": "COMMENT"}
-    if comments:
-        payload["comments"] = comments
+    # 1) full review with inline comments
     try:
-        post(payload)
-        print(f"posted review: {len(comments)} inline, {len(overflow)} in summary")
+        payload = {"body": review_body, "event": "COMMENT"}
+        if comments:
+            payload["comments"] = comments
+        review(payload)
+        print(f"posted review: {len(comments)} inline, {len(overflow)} notes")
+        return
     except RuntimeError as e:
-        # Inline comments 422 when a line isn't in the diff hunks — fall back to summary-only.
-        print(f"inline post failed ({e}); posting summary-only", file=sys.stderr)
-        post({"body": "\n".join(header + [summary_line(f) for f in findings]), "event": "COMMENT"})
+        print(f"inline review failed ({e})", file=sys.stderr)
+    # 2) summary-only review (inline lines not in the diff)
+    try:
+        review({"body": summary_only, "event": "COMMENT"})
         print("posted summary-only review")
+        return
+    except RuntimeError as e:
+        print(f"summary review failed ({e})", file=sys.stderr)
+    # 3) plain PR comment (works on closed/merged PRs)
+    gh(["api", f"repos/{repo}/issues/{pr}/comments", "-X", "POST", "--input", "-"],
+       inp=json.dumps({"body": summary_only}))
+    print("posted plain comment (reviews API unavailable — PR likely closed)")
 
 
 if __name__ == "__main__":
