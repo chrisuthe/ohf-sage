@@ -30,6 +30,16 @@ jobs:
       - name: Install GitHub Copilot CLI
         run: npm install -g @github/copilot
 
+      # Mint a token that acts as musicassistant-bot[bot] — used BOTH to authenticate the Copilot
+      # CLI (the bot's model access) and to post the review as the bot. Pinned to the same SHA the
+      # repo already uses for this action (per the "pin GitHub Actions to a SHA" principle).
+      - name: Create Music Assistant Bot token
+        id: bot
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.MUSIC_ASSISTANT_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.MUSIC_ASSISTANT_BOT_PRIVATE_KEY }}
+
       - name: Fetch Sage agent + corpus from the ohf-sage Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,9 +54,11 @@ jobs:
 
       - name: Sage review via Copilot CLI
         env:
-          # A PAT (or org token) on a Copilot-LICENSED identity. The default Actions token does
-          # not carry Copilot entitlement.
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          # The musicassistant-bot token. This assumes the bot is entitled to call the Copilot
+          # model backend. If THIS STEP fails on auth, the app installation token is NOT
+          # Copilot-licensed — swap in a Copilot-seated token here instead:
+          #   COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          COPILOT_GITHUB_TOKEN: ${{ steps.bot.outputs.token }}
           # Set repo/org variable SAGE_MODEL to your exact Claude id (`copilot` -> /model to list).
           SAGE_MODEL: ${{ vars.SAGE_MODEL || 'claude-opus-4.8' }}
         run: |
@@ -63,9 +75,9 @@ jobs:
             --allow-tool 'shell(grep:*)' --allow-tool 'shell(cat:*)' --allow-tool 'read' \
             --no-ask-user | tee findings.json
 
-      - name: Post the review to the PR
+      - name: Post the review as the bot
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr }}
         run: python .github/scripts/sage_post_review.py findings.json
