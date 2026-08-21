@@ -1,11 +1,11 @@
 {
-  "generated": "2026-08-03",
+  "generated": "2026-08-17",
   "repos": {
     "music-assistant/desktop-app": 5,
-    "music-assistant/frontend": 495,
+    "music-assistant/frontend": 736,
     "music-assistant/mobile-app": 8,
-    "music-assistant/server": 6404,
-    "music-assistant/support": 3780
+    "music-assistant/server": 7111,
+    "music-assistant/support": 3852
   },
-  "total": 10692
+  "total": 11712
 }
