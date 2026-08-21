@@ -12,6 +12,7 @@ from pathlib import Path
 
 _RELEASE_REPO = "chrisuthe/ohf-sage"
 _RELEASE_ASSETS = ["ohf-sage.md", "ohf-sage-corpus.jsonl"]
+_CORPUS_REL_PATH = ".claude/agents/ohf-sage-corpus.jsonl"
 
 
 def release_asset_url(repo, asset):
@@ -37,6 +38,27 @@ def install(agent_path, repo_dir):
     dest = dest_dir / agent_path.name
     shutil.copyfile(agent_path, dest)
     return dest
+
+
+def point_at_corpus(agent_dest, corpus_dest):
+    """Rewrite the agent's corpus references to where the corpus was actually
+    installed. Returns True if the agent was rewritten.
+
+    The agent ships a project-relative corpus path, which only resolves when it
+    is installed into a project and consulted from that project's root. Installed
+    anywhere else (e.g. ~/.claude/agents/, so the agent is available everywhere),
+    the grep finds nothing and the agent reports "no matching review history"
+    rather than "no corpus" - a silent loss of retrieval that looks like a
+    genuine no-match.
+    """
+    agent_dest, corpus_dest = Path(agent_dest), Path(corpus_dest).resolve()
+    text = agent_dest.read_text(encoding="utf-8")
+    if str(corpus_dest) in text:
+        return False
+    if _CORPUS_REL_PATH not in text:
+        return False
+    agent_dest.write_text(text.replace(_CORPUS_REL_PATH, str(corpus_dest)), encoding="utf-8")
+    return True
 
 
 def _resolve_git_dir(repo_dir):
@@ -126,10 +148,13 @@ def main(argv=None):
         args.agent = by_name["ohf-sage.md"]
         args.corpus = by_name["ohf-sage-corpus.jsonl"]
 
-    installed = [install(args.agent, args.repo_dir)]
+    agent_dest = install(args.agent, args.repo_dir)
+    installed = [agent_dest]
     corpus_path = Path(args.corpus)
     if not args.no_corpus and corpus_path.is_file():
-        installed.append(install(str(corpus_path), args.repo_dir))
+        corpus_dest = install(str(corpus_path), args.repo_dir)
+        installed.append(corpus_dest)
+        point_at_corpus(agent_dest, corpus_dest)
     for dest in installed:
         print(f"installed -> {dest}")
     if args.local_exclude:
