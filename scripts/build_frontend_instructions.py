@@ -11,7 +11,9 @@ import re
 import sys
 from pathlib import Path
 
-FRONTMATTER = '---\napplyTo: "**/*.{ts,vue}"\n---\n\n'
+# Comma-separated globs, not brace-expansion (`{ts,vue}`) — Copilot's instruction `applyTo`
+# parser may not expand braces, which would silently match nothing.
+FRONTMATTER = '---\napplyTo: "**/*.ts,**/*.vue"\n---\n\n'
 
 PREAMBLE = (
     "<!-- Generated from mined PR-review precedents; additive to the repo's README "
