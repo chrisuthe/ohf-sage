@@ -1,0 +1,312 @@
+{
+  "summary": "Determine whether native-quality (agentic + corpus-retrieval) PR review can run on a Copilot-billed / free model surface instead of paid Anthropic tokens",
+  "agentCount": 4,
+  "logs": [],
+  "result": {
+    "research": [
+      {
+        "topic": "Copilot cloud agent as reviewer + billing",
+        "summary": "There are TWO distinct GitHub products, and the reviewer question splits between them.\n\n(1) CAN IT REVIEW A PR — YES, but via \"Copilot code review,\" a SEPARATE feature from the coding agent, not the coding agent itself. You request it as a reviewer in the PR sidebar (\"Request\" next to Copilot under Reviewers), via `gh` CLI 2.88.0+ summoning `@copilot`, or automatically on new PRs. Output is exactly a structured review: a top-level summary comment plus inline comments anchored to specific diff lines, many with one-click \"suggested changes.\" Turnaround is usually under ~30 seconds. It is agentic — it gathers full-project context, and has a Low/Medium \"review effort\" control. The coding agent proper (the cloud agent) is built to AUTHOR code and OPEN PRs, not to review; it can be @-mentioned/steered but is the wrong tool for \"assess + comment on this PR.\" Both post to the PR's Conversation tab. Source: docs.github.com concepts/agents/code-review, github.blog changelog 2025-08-05, docs.github.com code-review how-tos.\n\n(2) MCP / RETRIEVAL — YES, confirmed and now GA specifically for the REVIEWER path. As of the 2026-07-29 GitHub changelog, \"Copilot code review: Agent skills and MCP now generally available\" for Pro, Pro+, Business, and Enterprise. MCP lets a review \"pull context from third-party platforms your team already uses (e.g., issue trackers, documentation systems, service catalogs).\" ALL MCP tool calls in code review are forced read-only. Existing MCP config set up for the cloud agent auto-applies to code review; GitHub + Playwright MCP are enabled by default. Only MCP *tools* are supported — NOT resources or prompts. For corpus/principles retrieval you also get \"agent skills\": a `SKILL.md` file under `.github/skills`. The cloud agent likewise supports MCP tools (GitHub MCP auto-configured with read-only, repo-scoped token). Source: github.blog changelog 2026-07-29, docs.github.com mcp-and-coding-agent.\n\n(4) CUSTOM AGENTS (.github/agents/*.agent.md) — Prompt body max is 30,000 characters (hard limit). YAML frontmatter fields: name, description, target, tools (allowlist), model, disable-model-invocation, user-invocable, infer, mcp-servers, metadata. Filename before .agent.md must match [.\\-_a-zA-Z0-9]. Definable at repo (.github/agents/), org (.github or .github-private), and enterprise levels. IMPORTANT SCOPE NOTE: custom agents (.agent.md) drive the CLOUD/CODING agent, not the code-review reviewer — the reviewer's extension mechanism is agent skills (SKILL.md) + MCP, not .agent.md. Whether the .agent.md body can reference/link external principle files is NOT documented (flagged as uncertainty); the practical pattern for injecting a principles corpus into a review is a SKILL.md and/or an MCP server. Source: docs.github.com reference/custom-agents-configuration, create-custom-agents.",
+        "can_run_agentic_review": "YES via Copilot code review (a feature distinct from the coding agent). Autonomous context-gathering + Low/Medium effort levels; corpus retrieval available through MCP tools (GA 2026-07-29) and .github/skills/SKILL.md; posts a structured review (summary + inline diff comments + suggestions). MCP tools are read-only; MCP resources/prompts unsupported.",
+        "billing": "NOT flat-included beyond a monthly allowance — it is metered, on TWO meters simultaneously, and overage is real money.\n\nMETER 1 — model usage. Two regimes coexist depending on plan/timing:\n  • LEGACY request-based billing (flat multipliers): Copilot code review = 13 premium requests PER PR review (13x multiplier). Copilot cloud/coding agent = 1 premium request PER SESSION (× the model's rate); each real-time steering comment during a session is another 1 premium request × model rate. Overage on Pro/Pro+ = $0.04 per premium request. So one code review ≈ 13 × $0.04 = ~$0.52 in overage once the monthly premium-request allowance is exhausted; one coding-agent session ≈ $0.04 × model multiplier.\n  • NEW AI-Credits usage-based billing (took effect 2026-06-01): premium-request units retired in favor of token-metered AI Credits, 1 credit = $0.01 USD. Code review and cloud agent now consume credits by actual token usage (input+output+cached) at each model's published API rate — so cost is variable, not a fixed 13x. Every plan bundles a monthly credit allowance (e.g., reports cite Pro ~$15, Pro+ ~$70, Max ~$200 of included credits; Business ~1,900 credits/user, Enterprise ~3,900 after the promo period ending 2026-09-01); beyond that it's usage-based overage.\n\nMETER 2 — GitHub Actions minutes. Since 2026-06-01, each code review ALSO burns GitHub Actions minutes from the org's monthly Actions allotment (agentic context-gathering runs as an Actions workflow), billed at standard per-minute Actions rates. The coding agent's environment likewise runs on Actions. This is the \"you pay twice\" complaint widely reported.\n\nBOTTOM LINE for the user: running these on \"Copilot's dime\" is only free up to the plan's monthly credit/premium-request allowance AND Actions-minutes allowance. A heavy corpus-retrieval review (many MCP tool calls, Medium effort, large diff) drives both token/credit usage and Actions minutes up; real users have reported single agentic sessions costing tens of dollars once metered. Note: inline code completions / Next Edit Suggestions remain unmetered, but that does not apply to review or agent sessions.",
+        "output_format": "Posts review comments (does NOT author a PR when used as reviewer): a top-level summary comment plus inline comments anchored to specific diff lines, many including one-click \"suggested changes,\" all in the PR Conversation tab. This IS a structured review. (The separate coding agent, by contrast, authors code and opens PRs.)",
+        "retrieval": "YES. MCP is GA for Copilot code review as of 2026-07-29 (Pro/Pro+/Business/Enterprise). MCP tools only (no resources/prompts), forced read-only. Plus agent skills via .github/skills/SKILL.md for repo/org-specific context and instructions. Cloud agent also supports MCP tools with GitHub MCP auto-configured (read-only, repo-scoped token). MCP config is JSON under repo Settings → Copilot → MCP servers and is shared between cloud agent and code review.",
+        "confidence": "high",
+        "limits": [
+          "Two separate products — reviewing a PR uses 'Copilot code review', NOT the coding agent. The coding agent authors code/opens PRs; it is not the reviewer, though it can be @-mentioned and steered.",
+          "Custom agents (.github/agents/*.agent.md, 30,000-char prompt cap) drive the CLOUD/CODING agent, NOT the code-review reviewer. The reviewer is extended via agent skills (.github/skills/SKILL.md) + MCP, not .agent.md.",
+          "MCP support in code review is tools-only and forced read-only; MCP resources and prompts are NOT supported, so a retrieval corpus must be exposed as MCP tools (or baked into SKILL.md).",
+          "Billing is metered on two meters (model usage AS premium requests OR token-based AI Credits since 2026-06-01, PLUS GitHub Actions minutes) — it is not fully flat-included beyond the monthly allowance; overage is billed.",
+          "Legacy flat multiplier: code review = 13 premium requests/review; cloud agent = 1 premium request/session (×model rate); Pro/Pro+ overage $0.04/request. Under the new AI-Credits model the cost is token-variable (1 credit = $0.01), not a fixed 13x.",
+          "Whether an .agent.md body can reference/link external principle files is not documented — treat as unconfirmed."
+        ],
+        "uncertainties": [
+          "Whether a .agent.md custom-agent body can @-reference or @import external files (e.g., a principles.md) is not stated in the official custom-agents-configuration reference. The documented mechanisms for external context are MCP servers and .github/skills/SKILL.md.",
+          "Exact AI-Credit token cost of a single corpus-retrieval-backed review is variable (depends on model, diff size, number of MCP tool calls, effort level) and not published as a fixed figure — the fixed '13 premium requests' figure is the LEGACY request-based number, not the post-2026-06-01 credits number.",
+          "Included-credit and included-Actions-minute allowances per plan are reported by secondary sources and a promo period ending 2026-09-01; confirm current numbers on github.com/features/copilot/plans before relying on them.",
+          "Whether a custom agent (.agent.md) can be explicitly invoked to perform a REVIEW (vs. authoring) is not documented; the supported reviewer path is Copilot code review + SKILL.md + MCP."
+        ],
+        "citations": [
+          {
+            "url": "https://docs.github.com/en/copilot/concepts/agents/code-review",
+            "key_claim": "Copilot code review is a separate feature from the coding agent that reviews code to identify issues and suggest fixes; it uses agentic context-gathering, offers Low/Medium effort, and can integrate with MCP servers and agent skills. Each review consumes AI credits plus GitHub Actions minutes."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-07-29-copilot-code-review-agent-skills-and-mcp-now-generally-available/",
+            "key_claim": "Copilot code review agent skills and MCP are GA for Pro/Pro+/Business/Enterprise; MCP lets reviews pull context from third-party platforms (issue trackers, docs systems, service catalogs), all MCP tool calls are read-only, existing cloud-agent MCP config applies, GitHub+Playwright MCP on by default, and SKILL.md files under .github/skills add repo/org context."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/copilot-code-review",
+            "key_claim": "Request a Copilot review via the Reviewers sidebar (Request next to Copilot) or gh CLI 2.88.0+; output is a top-level summary plus inline comments anchored to diff lines with one-click suggested changes, added to the PR Conversation tab, usually in under ~30 seconds."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/reference/copilot-billing/request-based-billing-legacy/copilot-requests",
+            "key_claim": "Under legacy request-based billing, Copilot code review consumes 13 premium requests per PR review (13x model multiplier); Copilot cloud agent consumes one premium request per session multiplied by the model rate (each steering comment is another one); additional premium requests cost $0.04 each on Pro/Pro+."
+          },
+          {
+            "url": "https://github.blog/news-insights/company-news/github-copilot-is-moving-to-usage-based-billing/",
+            "key_claim": "On 2026-06-01 GitHub replaced premium-request units with token-metered GitHub AI Credits (1 credit = $0.01), with each plan including a monthly credit allowance and usage beyond it billed as overage."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/concepts/agents/coding-agent/mcp-and-coding-agent",
+            "key_claim": "Copilot cloud agent supports MCP tools (not resources or prompts); the GitHub MCP server is auto-configured with a read-only, repo-scoped token; MCP config is shared between cloud agent and code review."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/reference/custom-agents-configuration",
+            "key_claim": "Custom agents are .agent.md files in .github/agents with YAML frontmatter (name, description, target, tools, model, disable-model-invocation, user-invocable, infer, mcp-servers, metadata) and a markdown prompt body limited to 30,000 characters; definable at repo, org, and enterprise levels."
+          },
+          {
+            "url": "https://blog.codacy.com/github-copilot-code-review-used-to-be-included-from-june-1st-you-pay-twice",
+            "key_claim": "From 2026-06-01 Copilot code review is no longer flat-included: it consumes AI Credits for model tokens AND GitHub Actions minutes, so teams effectively pay on two meters."
+          }
+        ]
+      },
+      {
+        "topic": "GitHub Models API as review backend",
+        "summary": "DECISIVE FINDING that overrides the premise: GitHub Models is FULLY RETIRED as of today, July 30, 2026. Per GitHub's own docs, \"As of July 30, 2026, GitHub Models has been fully retired\" (https://docs.github.com/billing/managing-billing-for-your-products/about-billing-for-github-models). The July 1, 2026 changelog confirms the playground, model catalog, inference API, and BYOK \"will no longer be available\" to ANY customer, it was closed to new customers in June 2026, and brownouts ran July 16 and July 23 (https://github.blog/changelog/2026-07-01-github-models-is-being-fully-retired-on-july-30-2026/). So building a NEW PR-review Action on the GitHub Models inference endpoint (models.github.ai / models.inference.ai.azure.com) is a dead end — the endpoint is gone. GitHub's recommended replacements are Microsoft Foundry (broad model catalog, pay-as-you-go) and GitHub Copilot (bundled model access). \\n\\nHISTORICAL ANSWERS to the four questions (accurate for GitHub Models while it existed, now moot): (1) WHAT: GitHub Models was a marketplace + OpenAI-compatible inference API exposing many models — Anthropic Claude (Opus/Sonnet/Haiku 3.5/3.7/4), OpenAI GPT-4o/4.1/o-series, Google Gemini 2.x, Meta Llama, Mistral, DeepSeek, Phi, etc. AUTH: inside Actions you used the built-in GITHUB_TOKEN (or a PAT with the models:read scope) as the bearer token — GitHub Actions token integration went GA April 14, 2025 (https://github.blog/changelog/2025-04-14-github-actions-token-integration-now-generally-available-in-github-models/), so no separate API key was needed; you added `permissions: models: read` to the workflow. (2) BILLING: yes, there was a genuinely free tier (\"Model access is free to start within our rate limits\") gated by per-minute / per-day request caps and input/output token-per-request caps that varied by model tier (Low/High/Embedding) and by the account's Copilot plan (Free vs Pro vs Business/Enterprise got higher caps). Paid was pay-as-you-go metered on token units at a unified per-token-unit price (docs example: 1,250,000 token units = $12.50, i.e. $0.00001/unit), via credit card/PayPal/invoice, plus a BYOK path. (3) FEASIBILITY at real PR volume: the free tier was explicitly positioned for \"prototyping and experimentation,\" and the low per-minute/per-day request caps made it impractical for a busy repo's PR-review Action on the free tier — a multi-file review can burn several calls per PR and easily hit daily caps; you needed paid pay-as-you-go for production volume. (4) RELATIONSHIP TO COPILOT: GitHub Models was a SEPARATE product with its own free rate limits and its own pay-as-you-go metered billing (billed to the GitHub account like other metered products) — NOT drawn from a Copilot subscription's premium-request quota. However, the SIZE of the Models free rate limits was influenced by which Copilot plan the account had. They were distinct quotas.",
+        "can_run_agentic_review": "Not applicable to the product itself — GitHub Models was only an inference API (chat/embeddings), it had no retrieval/MCP/corpus layer and did not post reviews on its own. A custom PR-review GitHub Action built on it could do a full-attention agentic review only if the Action author added the scaffolding themselves: fetch the diff/context via the GitHub API, do any retrieval, call the model, and post a structured review via the Checks/Reviews API. As of 2026-07-30 this is moot because the endpoint is retired; the equivalent path now is Microsoft Foundry or Copilot models behind your own Action code.",
+        "billing": "Historical (product now retired): a real FREE tier gated by per-minute + per-day request caps and per-request token caps (caps varied by model tier and by the account's Copilot plan; free tier was for prototyping only). Paid = pay-as-you-go METERED on token units at a unified per-token-unit price (docs example $0.00001/token unit; 1.25M units = $12.50), paid by card/PayPal/invoice, plus a BYOK option. It was billed as its own GitHub metered product, SEPARATE from any Copilot subscription quota. All of this ceased to be purchasable/usable on July 30, 2026.",
+        "retrieval": "No. GitHub Models exposed only inference (chat completions + embeddings via an OpenAI-compatible API). There was no built-in MCP server, corpus, or retrieval layer — any retrieval had to be built by the caller.",
+        "output_format": "The API returns raw model completions (text/JSON) only. It does not post review comments or author PRs itself. To emit a structured PR review you would wrap it in a GitHub Action that formats the model output and posts via the GitHub Reviews/Checks API.",
+        "confidence": "high",
+        "limits": [
+          "GitHub Models is FULLY RETIRED as of 2026-07-30 — inference API, playground, model catalog, and BYOK are all gone; a new Action cannot use it",
+          "Free tier was explicitly 'prototyping and experimentation' only; low per-minute/per-day request caps made real PR-review volume impractical without paid pay-as-you-go",
+          "Exact historical rate-limit numbers (req/min, req/day, token caps per tier) are no longer on the live GitHub docs — the billing page was replaced with the retirement notice, so precise figures can no longer be confirmed from a primary source",
+          "Free-tier caps were tied to the account's Copilot plan tier, so 'free' capacity was uneven across accounts",
+          "GitHub's recommended successors are Microsoft Foundry (pay-as-you-go, no free-inference tier comparable to Models) and GitHub Copilot models (which DO draw on Copilot premium-request quota) — different billing model from old GitHub Models"
+        ],
+        "uncertainties": [
+          "Exact free-tier rate-limit values (requests/min, requests/day, input/output token caps per model tier) cannot be confirmed from a live primary source now that the billing doc shows only the retirement notice; historical figures were roughly: Low-tier models ~15 req/min and ~150 req/day on the base free tier, High-tier models much lower (single digits/min, tens/day), with higher caps for paid Copilot plans — treat as approximate/unverifiable",
+          "Whether any grandfathered/enterprise access persists past 2026-07-30 — the changelog says retirement applies to ALL customers including active usage, implying none",
+          "Precise current Microsoft Foundry / Copilot-model pricing as a replacement backend was not researched here"
+        ],
+        "citations": [
+          {
+            "url": "https://docs.github.com/billing/managing-billing-for-your-products/about-billing-for-github-models",
+            "key_claim": "'As of July 30, 2026, GitHub Models has been fully retired.' The live billing doc now shows only the retirement notice and points to Azure AI Foundry and GitHub Copilot."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-07-01-github-models-is-being-fully-retired-on-july-30-2026/",
+            "key_claim": "Retired July 30, 2026; the playground, model catalog, inference API, and BYOK 'will no longer be available'; closed to new customers in June 2026; brownouts July 16 and 23; recommends Microsoft Foundry and GitHub Copilot."
+          },
+          {
+            "url": "https://github.blog/changelog/2025-04-14-github-actions-token-integration-now-generally-available-in-github-models/",
+            "key_claim": "Built-in GITHUB_TOKEN could authenticate requests to GitHub Models from Actions (GA), removing the need for a separate PAT; workflows added 'permissions: models: read'."
+          },
+          {
+            "url": "https://github.blog/changelog/2025-06-24-github-models-now-supports-moving-beyond-free-limits/",
+            "key_claim": "'Model access is free to start within our rate limits' then transition to paid pay-as-you-go for higher-capacity, enterprise-grade usage beyond free rate limits (card/PayPal/invoice)."
+          }
+        ]
+      },
+      {
+        "topic": "Copilot premium requests + custom model access",
+        "summary": "RESEARCH FINDINGS (as of July 2026 — a billing model transition on June 1, 2026 makes this area unusually stale-prone; flag anything you rely on).\n\nIMPORTANT CONTEXT: On June 1, 2026 GitHub replaced the \"premium request\" (PRU) system with usage-based \"GitHub AI Credits\" (token-metered). The old premium-request model still exists as \"request-based billing (legacy)\" for annual subscribers until their plan renews. So both systems are live right now. The user's question is framed on premium requests, so I cover both.\n\n(1) PREMIUM-REQUEST SYSTEM (2025 → legacy-2026)\n- Included allowances per month: Copilot Free = 50; Copilot Pro ($10/mo) = 300; Copilot Pro+ ($39/mo) = 1,500; Copilot Business ($19/user/mo) = 300; Copilot Enterprise ($39/user/mo) = 1,000. (Business/Enterprise numbers are the widely-published historical figures; the current legacy doc only spells out Pro=300 and Pro+=1,500 explicitly — treat Free/Business/Enterprise as the standard published values, medium confidence.)\n- What consumes them: any use of a NON-default (premium) model, in Copilot Chat, agent mode, Copilot CLI, Copilot code review, Copilot coding agent (cloud agent), Spark, and third-party/agentic coding agents. Each user prompt = 1 premium request × the model's multiplier. The base/default model (e.g. GPT-4.1 / GPT-4o-class) is 0× — i.e. effectively unlimited on paid plans, doesn't draw down the quota.\n- Model multipliers (legacy request-based table): base model 0×; Claude Sonnet 3.5/standard premium and GPT-5-class = 1×; Google/OpenAI mid-tier reasoning ~1×; Claude Opus = 10× (current paid), rising to ~27× and Sonnet ~9× on the updated legacy annual table that took effect June 1, 2026. Multipliers increased on June 1 for annual/legacy subscribers only.\n- Overage: $0.04 per additional premium request (Pro and Pro+), billed only if the org/user has enabled paid overage; otherwise premium features stop until the monthly reset.\n\n(1b) NEW AI-CREDITS SYSTEM (default from June 1, 2026): PRUs replaced by GitHub AI Credits consumed on token usage (input + output + cached) at each model's published API rate. Monthly credit allotments: Pro $10, Pro+ $39, Business $19/user, Enterprise $39/user (dollar-denominated credits, not request counts). Overage = published per-token model rates, and the user chooses to allow paid overage or hard-cap spend.\n\n(2) CODE REVIEW BOT & CODING AGENT — do they consume quota?\n- Copilot code review (the PR bot / IDE review): NOT flat/free. It carries a multiplier of 13 — each PR review or IDE review = 13 premium requests off your monthly quota (started June 1, 2026). ADDITIONALLY, from June 1, 2026 code review also consumes GitHub Actions minutes, billed at normal Actions per-minute rates. Exception: \"review selection\" (highlight code → ask for an initial review in VS Code) is a standard feature = 0 premium requests.\n- Copilot coding agent: consumes premium requests AND Actions minutes. Each coding-agent session = 1 premium request (× model multiplier), drawn from the same shared monthly allowance as Chat, plus the Actions minutes for the workflow run.\n\n(3) CAN YOU CALL COPILOT'S MODELS AS A RAW API BILLED AGAINST THE COPILOT SEAT?\n- Officially: NO. GitHub's own \"Copilot vs. raw API access\" post draws a hard line — Copilot is \"development tooling around the model,\" and raw/direct API access is a SEPARATE path for \"building a product feature, an internal agent platform, an evaluation harness, or an automation pipeline.\" There is no supported endpoint that lets your own agent framework or a GitHub Action spend the Copilot seat's model quota. Copilot model access is confined to Copilot's own surfaces (IDE, CLI, Chat, code review, coding agent).\n- GitHub Models (the separate product at github.com/marketplace/models / Azure AI Inference endpoint) is the sanctioned \"call models from your code\" path, but it is NOT billed against the Copilot seat — it has its own free/rate-limited tier and its own paid usage billed as tokens.\n- BYOK (\"bring your own key\") lets you plug a provider key into Copilot Chat/CLI/VS Code, but that shifts token billing to YOUR provider account, not the Copilot seat — the opposite direction from what's asked.\n- UNSANCTIONED workaround: reverse-engineered proxies (ericc-ch/copilot-api, messense/copilot-api-proxy) authenticate as a Copilot seat and re-expose the internal api.githubcopilot.com endpoint as OpenAI/Anthropic-compatible APIs — effectively spending Copilot quota from arbitrary code. This works in practice AND is explicitly a GitHub Terms-of-Service violation: ToS prohibits \"proxy usage,\" automated/bulk requests, and interfering with how Copilot works. Users have reported Copilot access disabled / accounts suspended for it. Not viable for anything you want to depend on.\n\n(4) CAN anthropics/claude-code-action (OR A GENERIC AGENT) BE POINTED AT A GITHUB/COPILOT-HOSTED MODEL ENDPOINT?\n- claude-code / claude-code-action supports ANTHROPIC_BASE_URL (+ ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL), so it can target ANY gateway that speaks the Anthropic Messages API (/v1/messages). Officially supported non-Anthropic backends are AWS Bedrock and Google Vertex — NOT GitHub Models and NOT Copilot.\n- GitHub Models exposes an OpenAI/Azure-AI-Inference-compatible endpoint, not the Anthropic Messages format, so you cannot point claude-code-action straight at it — you'd need a translating proxy (Anthropic-format → GitHub Models). That would run on GitHub Models' own billing, not the Copilot seat.\n- To make claude-code-action spend the COPILOT seat, the only path is the reverse-engineered copilot-api proxy above (it exposes an Anthropic-compatible endpoint specifically \"Usable with Claude Code\"). It functions, but same ToS-violation / suspension risk — do not build a production pipeline on it.\n\nBOTTOM LINE for an agent-framework/CI use case: there is no supported way to reuse Copilot seat model quota from your own code. Use GitHub Models (sanctioned, separate token billing) or a direct Anthropic/Bedrock/Vertex key with claude-code-action. Copilot quota stays inside Copilot's products.",
+        "can_run_agentic_review": "Not in the \"raw model quota from your own agent\" sense. Copilot's PR review bot is a fixed, GitHub-hosted reviewer (13-premium-request multiplier per review) that posts inline comments — it is NOT a full-attention agentic reviewer you can drive with custom corpus retrieval. The closest agentic surface is the Copilot coding agent (MCP-capable, runs in Actions, authors branches/PRs), but it too runs only inside Copilot's product boundary and cannot be repurposed as a raw model endpoint. For a custom agentic review with your own corpus/RAG, you would run your own agent (e.g. claude-code-action) against GitHub Models or a direct provider key — NOT against the Copilot seat.",
+        "billing": "Two overlapping systems in July 2026. LEGACY (request-based, annual/until-renewal): flat monthly allotment of premium requests (Free 50, Pro 300, Pro+ 1,500, Business ~300, Enterprise ~1,000); default model 0× (free/unlimited); premium models 1×–27× multipliers (Claude Opus up to ~27× on the June-2026 legacy table, Sonnet ~9×, standard premium 1×); code review = 13× per review; coding agent = 1× per session; overage $0.04/premium request only if paid overage enabled. NEW (usage-based AI Credits, default from June 1 2026): monthly credit allowance equal to plan price ($10/$39/$19/$39), consumed by input+output+cached tokens at each model's published API rate; overage = published per-token rates or hard cap. Code review and coding agent ALSO burn GitHub Actions minutes (normal Actions per-minute billing) on top of credits/premium requests. Raw model calls from your own code are NOT billable to the Copilot seat by any supported mechanism.",
+        "retrieval": "Copilot coding agent supports MCP servers (so it can pull tool/context data), but there is no supported way to feed a custom corpus/RAG into the Copilot code-review bot, and no way to call Copilot models from an external retrieval-augmented pipeline billed to the seat. Sanctioned \"call-from-your-code\" retrieval workflows must use GitHub Models or a direct provider API (separate billing), where you own the retrieval/MCP layer yourself.",
+        "output_format": "Copilot code review posts inline PR review comments (GitHub-controlled format, not a customizable structured review). Copilot coding agent authors code/branches/PRs. Neither can be redirected to emit a custom structured review payload from your own model calls. A custom structured review requires running your own agent (claude-code-action or similar) against GitHub Models or a direct provider key.",
+        "confidence": "medium",
+        "limits": [
+          "Free/Business/Enterprise premium-request allowances (50/300/1,000) are the widely-published historical figures; the current legacy doc explicitly confirms only Pro=300 and Pro+=1,500 — treat the others as standard-but-unverified for July 2026.",
+          "Model multipliers are in flux: the June 1 2026 legacy-annual table pushed Claude Opus to ~27× and Sonnet to ~9× per third-party summaries; the primary GitHub multiplier doc was not fetched cleanly, so exact current per-model numbers should be re-verified against docs.github.com before quoting.",
+          "The new AI-Credits (token-metered) system is now the default and coexists with legacy request-based billing — which one applies depends on plan type and renewal timing; premium-request language is being phased out.",
+          "Reverse-engineered Copilot proxies (copilot-api, copilot-api-proxy) work today but are explicit ToS violations with documented account-suspension risk and can break without notice — not a dependable integration path."
+        ],
+        "uncertainties": [
+          "Exact GitHub Actions per-minute cost added to each code-review / coding-agent run was not quantified.",
+          "Whether any private/enterprise agreement (e.g. Copilot Enterprise + Azure) exposes Copilot-seat model quota via a supported API — no evidence found either way; assume no.",
+          "Precise current multiplier for Copilot code review under the NEW AI-Credits token model (the '13×' figure is from the legacy request-based framing).",
+          "Whether GitHub Models' free-tier rate limits are workable for a production review pipeline (not investigated)."
+        ],
+        "citations": [
+          {
+            "url": "https://docs.github.com/en/copilot/concepts/billing/copilot-requests",
+            "key_claim": "Copilot Pro = 300 premium requests/mo ($10), Pro+ = 1,500 ($39); overage $0.04/request; code review consumes 13 premium requests; coding agent 1 per session; Chat 1 per prompt × model multiplier."
+          },
+          {
+            "url": "https://github.blog/news-insights/company-news/github-copilot-is-moving-to-usage-based-billing/",
+            "key_claim": "'Starting June 1, premium request units (PRUs) will be replaced by GitHub AI Credits' consumed on token usage at published API rates; plan credits Pro $10 / Pro+ $39 / Business $19 / Enterprise $39; code review also consumes GitHub Actions minutes."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-04-27-github-copilot-code-review-will-start-consuming-github-actions-minutes-on-june-1-2026/",
+            "key_claim": "From June 1 2026 Copilot code review consumes GitHub Actions minutes in addition to AI Credits/premium requests, billed at standard Actions per-minute rates; code review multiplier of 13."
+          },
+          {
+            "url": "https://github.blog/ai-and-ml/github-copilot/copilot-vs-raw-api-access-what-are-you-actually-paying-for/",
+            "key_claim": "GitHub frames Copilot (seat-based tooling) and raw/direct API access as separate paths; no supported way to call Copilot models as a raw API billed to the seat; BYOK shifts token billing to your provider."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/reference/copilot-billing/request-based-billing-legacy/model-multipliers-for-annual-plans",
+            "key_claim": "Legacy annual multiplier table (effective June 1 2026): Claude Opus ~27×, Sonnet ~9×, standard premium models 1×, base/default model 0×."
+          },
+          {
+            "url": "https://github.com/ericc-ch/copilot-api",
+            "key_claim": "Reverse-engineered proxy turns a GitHub Copilot seat into OpenAI/Anthropic-compatible API endpoints 'Usable with Claude Code' — unsupported, ToS-risky."
+          },
+          {
+            "url": "https://github.com/orgs/community/discussions/174325",
+            "key_claim": "Users report Copilot access disabled; GitHub ToS prohibits proxy usage and automated/bulk requests, with suspension as a consequence."
+          },
+          {
+            "url": "https://github.com/marketplace/models",
+            "key_claim": "GitHub Models is the sanctioned call-models-from-your-code product with its own free/paid token billing, separate from the Copilot seat."
+          }
+        ]
+      }
+    ],
+    "synth": {
+      "direct_answer": "Partial, leaning no — and definitely not \"free\" in the way the framing hopes. There is no SUPPORTED path that runs the full native architecture (full-attention agent + YOUR corpus RAG, i.e. what got 3/6) on a Copilot-billed or free model surface at zero marginal cost. Two honest catches kill the clean answer: (1) Copilot code review CAN now do the agentic+retrieval architecture (MCP tools + .github/skills/SKILL.md went GA 2026-07-29), but it is metered on TWO meters — model usage (13 premium requests/review under legacy billing, OR token-based AI Credits since 2026-06-01) PLUS GitHub Actions minutes — so it is free only inside your plan's monthly allowance, not truly free; and its recall is bounded by GitHub's reviewer ENGINE, the same engine class that scored 1/6, so lifting it to native 3/6 by bolting on retrieval is plausible-but-unproven, not guaranteed. (2) The sanctioned \"call raw models from your own Action\" path, GitHub Models, is retired (fully gone 2026-07-30; brownouts were already running the week of your 2026-07-26 clock), so building a custom Action on it is a dead end. The only way to get LITERAL Claude-native quality billed to the Copilot seat is a reverse-engineered proxy that is an explicit ToS violation with documented account suspensions — not dependable. So: the realistic non-Anthropic-token move is to feed your corpus into Copilot code review via MCP+SKILL.md and benchmark whether that beats 1/6, while accepting it may plateau below native 3/6 and still meters beyond the monthly allowance.",
+      "options": [
+        {
+          "name": "Copilot code review + MCP corpus + SKILL.md principles",
+          "surface": "GitHub PR reviewer (request Copilot in the Reviewers sidebar, or gh CLI 2.88.0+, or auto-on-new-PR). Posts a top-level summary comment plus inline diff-anchored comments with one-click suggested changes, in the Conversation tab, usually <30s. This IS the same 'review-bot' you already tested — but now extensible.",
+          "marginal_cost": "metered premium-requests+overage (13 premium requests per review under legacy request-based billing; OR token-metered AI Credits at published API rates since 2026-06-01, 1 credit = $0.01) PLUS GitHub Actions minutes on top — the 'pay twice' meters. Free ONLY within the plan's monthly credit/premium-request allowance and Actions-minute allotment; overage is real money ($0.04/premium request on Pro/Pro+ legacy, or per-token beyond credits).",
+          "quality_vs_native": "Architecturally it now matches the native pattern (agentic context-gathering + Low/Medium effort + corpus retrieval), so it SHOULD beat the un-augmented 1/6. But recall is capped by GitHub's fixed reviewer engine — the exact engine class that produced 1/6 — not by the model. Adding retrieval may lift recall but reaching native 3/6 is unproven and not something you can tune the way a full-attention agent lets you. Treat 'can it hit 3/6' as an open empirical question, likely a partial lift, not a guaranteed match.",
+          "retrieval": "YES, and this is the material change vs the bot you tested: MCP tools (GA for code review 2026-07-29, forced read-only, tools only — no MCP resources/prompts) + agent skills via .github/skills/SKILL.md for your principles corpus. MCP config lives under repo Settings -> Copilot and is shared with the cloud agent. So your corpus must be exposed either as an MCP server (read-only tools) or baked into SKILL.md.",
+          "catch": "Not truly free — two meters beyond the monthly allowance. And the engine cap that produced 1/6 is the same ceiling here; retrieval feeds the engine better context but does not swap in a full-attention agent. Also note: NOT the coding agent and NOT a .github/agents/*.agent.md custom agent — those drive the code-AUTHORING cloud agent; the reviewer's only extension points are SKILL.md + MCP."
+        },
+        {
+          "name": "Custom GitHub Action on GitHub Models inference API",
+          "surface": "Your own Action: fetch diff/context via GitHub API, run your own retrieval, call a model, post via the Reviews/Checks API. You control the whole architecture, so it COULD replicate native quality.",
+          "marginal_cost": "n/a — product retired. (Historically: a real free tier gated by low per-minute/per-day request caps meant for prototyping only, then pay-as-you-go per-token at ~$0.00001/token unit — billed as its own metered GitHub product, NOT against the Copilot seat.)",
+          "quality_vs_native": "Could match native IF you rebuilt the agent+RAG scaffolding yourself — but moot, the endpoint is gone.",
+          "retrieval": "None built-in; you would build the retrieval/MCP layer yourself in the Action.",
+          "catch": "DEAD END. GitHub Models is fully retired 2026-07-30 (inference API, catalog, playground, BYOK all gone; brownouts ran July 16 and 23; closed to new customers June 2026). Even before retirement the free tier's rate caps were 'prototyping only' and impractical for real PR volume. GitHub points you to Microsoft Foundry (pay-as-you-go, no comparable free inference tier) or Copilot models. Do not build here. (Minor date note: research states 'fully retired' as of 2026-07-30 vs your session clock of 2026-07-26 — either way it's in its final brownout days and not a durable path.)"
+        },
+        {
+          "name": "copilot-api reverse-proxy -> claude-code-action on the Copilot seat",
+          "surface": "Your EXISTING claude-code-action pipeline unchanged, with ANTHROPIC_BASE_URL pointed at a reverse-engineered proxy (ericc-ch/copilot-api or similar) that re-exposes the internal Copilot endpoint as an Anthropic-Messages-compatible API.",
+          "marginal_cost": "Effectively free at the margin — it spends the Copilot seat's model quota instead of Anthropic tokens. That 'free' IS the violation, not a feature.",
+          "quality_vs_native": "TRUE native — it is real Claude driven by your own full-attention agent + your corpus retrieval, so it reproduces the 3/6 result and the comprehensive cited reviews. This is the only path that both avoids Anthropic per-token cost AND matches native quality.",
+          "retrieval": "Full — your own corpus/RAG, identical to the native setup (retrieval lives in your agent, not the proxy).",
+          "catch": "Explicit GitHub Terms-of-Service violation (ToS prohibits proxy usage, automated/bulk requests, and interfering with how Copilot works). Documented account suspensions / Copilot access disabled for exactly this. Can break without notice on any Copilot backend change. NOT dependable — do not build a production review pipeline on it. This is why the 'free native quality on Copilot' answer is effectively no."
+        },
+        {
+          "name": "Stay on paid Anthropic native (claude-code-action, direct API key)",
+          "surface": "The proven pipeline — full-attention agent + corpus retrieval via claude-code-action on the Anthropic API. Posts the comprehensive cited review you benchmarked.",
+          "marginal_cost": "per-token (Anthropic API) — the cost you are trying to avoid.",
+          "quality_vs_native": "IS native — 3/6 exact-issue recall proven, comprehensive cited reviews. The ceiling, not an approximation.",
+          "retrieval": "Full — your corpus, your RAG, fully controllable (the reason quality is what it is).",
+          "catch": "Costs Anthropic tokens per review. But it is supported, dependable, tunable, and the only supported way to get 3/6. The real tradeoff is dollars-per-review vs the risk/uncertainty of the Copilot-billed options."
+        },
+        {
+          "name": "Stay on the free capped Copilot review-bot skill (as tested)",
+          "surface": "Copilot code review with no custom retrieval — the 1/6 baseline.",
+          "marginal_cost": "truly free within allowance today — BUT note that since 2026-06-01 even this consumes 13 premium requests + Actions minutes per review, so 'free' holds only inside the monthly allowance; heavy PR volume can push it into overage.",
+          "quality_vs_native": "Capped at 1/6 by the reviewer engine (not the model). No path to native without adding retrieval (which becomes Option 1).",
+          "retrieval": "None as tested — this is exactly the gap Option 1 closes by adding MCP+SKILL.md.",
+          "catch": "Engine-capped recall; and it is drifting from 'free' toward metered as of the June 2026 billing change. Only worth keeping if 1/6 is acceptable."
+        }
+      ],
+      "recommendation": "Do the one legitimate experiment before spending anything: take the free Copilot code-review bot you already tested and give it your corpus — expose the principles/RAG source as a read-only MCP server (tools only) and/or bake it into .github/skills/SKILL.md — then re-run the same 6-issue benchmark head-to-head. This is the only supported, non-Anthropic-token way to attack the gap, and MCP+SKILL.md for code review only went GA 2026-07-29, so the bot you scored at 1/6 almost certainly ran WITHOUT retrieval; retrieval is the biggest untested lever. Set expectations honestly going in: (a) it is not truly free — beyond your plan's monthly credit/premium-request allowance it meters on model usage AND GitHub Actions minutes; (b) recall is bounded by GitHub's reviewer engine (the 1/6 engine), so a partial lift is likely and a full match to native 3/6 is unproven — decide in advance what recall makes it 'good enough.' If the retrieval-augmented bot still falls short of your bar, there is no supported free path to native quality: either keep paying Anthropic per-token (Option 4 — supported, dependable, the only proven 3/6) or accept the ToS-violating proxy (Option 3 — genuinely free native quality but suspension-risky and undependable; I would not build on it). Rule out GitHub Models entirely (retired). Net: the architecturally-honest answer to the user's framing is that the native quality IS reproducible on Copilot's dime only via the proxy that violates ToS; the compliant Copilot surface can run the same architecture but through a capped engine, so it is a 'maybe it closes the gap, benchmark it' — not a free lunch.",
+      "open_questions_for_user": [
+        "Which billing regime is the Copilot account actually on right now — legacy request-based (13 premium requests/review) or the new token-metered AI Credits (default since 2026-06-01)? It depends on plan type and renewal timing, and it changes the per-review cost from a fixed 13x to a variable token figure.",
+        "What Copilot plan/seat is it (Free/Pro/Pro+/Business/Enterprise), what is the monthly credit/premium-request allowance, and is paid overage ENABLED or hard-capped? 'We don't pay for Copilot use' holds only inside the allowance — this determines whether a retrieval-heavy review actually stays free.",
+        "Is the org near its GitHub Actions monthly minute allotment? Since 2026-06-01 every Copilot code review also burns Actions minutes, so a busy repo can hit the second meter even if credits are fine.",
+        "Can the principles corpus be exposed as a read-only MCP server (tools only — no MCP resources/prompts are supported in code review), or does it need to be flattened into a .github/skills/SKILL.md? This determines how faithfully your RAG transfers to the Copilot reviewer.",
+        "Are you willing to run the same 6-issue benchmark against a retrieval-augmented Copilot code review before committing? That is the only way to know if retrieval lifts the engine above 1/6 toward the native 3/6 — everything else is architectural inference.",
+        "What recall bar makes it 'good enough' to stop paying Anthropic per-token — is a partial lift (say 2/6) acceptable, or is matching native 3/6 the hard requirement? This decides whether the compliant Copilot path is even viable or whether you stay on the paid native pipeline."
+      ]
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Research"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Synthesize"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "research:cloud-agent",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a75346dd2ebe2c4bd",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785451704929,
+      "queuedAt": 1785451703310,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Copilot cloud agent as reviewer + billing",
+      "promptPreview": "You have web access but must load the tools first: call ToolSearch with query \"select:WebSearch,WebFetch\", then use them. Prefer OFFICIAL sources (docs.github.com, github.blog, docs.github.com/billing, github.com/marketplace/models) and 2026 material — Copilot billing and agent features change monthly, so flag anything older as possibly stale. Cite the source URL and quote the key sentence for eve…",
+      "lastProgressAt": 1785451880012,
+      "tokens": 57571,
+      "toolCalls": 14,
+      "durationMs": 175083,
+      "resultPreview": "{\"topic\":\"Copilot cloud agent as reviewer + billing\",\"summary\":\"There are TWO distinct GitHub products, and the reviewer question splits between them.\\n\\n(1) CAN IT REVIEW A PR — YES, but via \\\"Copilot code review,\\\" a SEPARATE feature from the coding agent, not the coding agent itself. You request it as a reviewer in the PR sidebar (\\\"Request\\\" next to Copilot under Reviewers), via `gh` CLI 2.88.…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "research:github-models",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a6a4303797cc71156",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785451705623,
+      "queuedAt": 1785451703311,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "GitHub Models API as review backend",
+      "promptPreview": "You have web access but must load the tools first: call ToolSearch with query \"select:WebSearch,WebFetch\", then use them. Prefer OFFICIAL sources (docs.github.com, github.blog, docs.github.com/billing, github.com/marketplace/models) and 2026 material — Copilot billing and agent features change monthly, so flag anything older as possibly stale. Cite the source URL and quote the key sentence for eve…",
+      "lastProgressAt": 1785451814958,
+      "tokens": 51351,
+      "toolCalls": 9,
+      "durationMs": 109335,
+      "resultPreview": "{\"topic\":\"GitHub Models API as review backend\",\"summary\":\"DECISIVE FINDING that overrides the premise: GitHub Models is FULLY RETIRED as of today, July 30, 2026. Per GitHub's own docs, \\\"As of July 30, 2026, GitHub Models has been fully retired\\\" (https://docs.github.com/billing/managing-billing-for-your-products/about-billing-for-github-models). The July 1, 2026 changelog confirms the playground,…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "research:premium-billing",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a1d10633737167526",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785451705045,
+      "queuedAt": 1785451703311,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Copilot premium requests + custom model access",
+      "promptPreview": "You have web access but must load the tools first: call ToolSearch with query \"select:WebSearch,WebFetch\", then use them. Prefer OFFICIAL sources (docs.github.com, github.blog, docs.github.com/billing, github.com/marketplace/models) and 2026 material — Copilot billing and agent features change monthly, so flag anything older as possibly stale. Cite the source URL and quote the key sentence for eve…",
+      "lastProgressAt": 1785451883433,
+      "tokens": 56406,
+      "toolCalls": 12,
+      "durationMs": 178388,
+      "resultPreview": "{\"topic\":\"Copilot premium requests + custom model access\",\"summary\":\"RESEARCH FINDINGS (as of July 2026 — a billing model transition on June 1, 2026 makes this area unusually stale-prone; flag anything you rely on).\\n\\nIMPORTANT CONTEXT: On June 1, 2026 GitHub replaced the \\\"premium request\\\" (PRU) system with usage-based \\\"GitHub AI Credits\\\" (token-metered). The old premium-request model still e…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "synthesize:free-native",
+      "phaseIndex": 2,
+      "phaseTitle": "Synthesize",
+      "agentId": "a17a5a68c5e682125",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785451886840,
+      "queuedAt": 1785451885143,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Partial, leaning no — and definitely not \"free\" in the way …",
+      "promptPreview": "You are answering a specific user cost question: they have a Copilot subscription (\"we don't pay for Copilot use\") and pay per-token for Anthropic. We proved that a NATIVE agentic Sage review (full-attention agent + corpus retrieval, run via claude-code-action on the Anthropic API) gets 3/6 exact-issue recall and comprehensive cited reviews, vs 1/6 for the free Copilot review-bot skill (whose cap …",
+      "lastProgressAt": 1785451988123,
+      "tokens": 52661,
+      "toolCalls": 1,
+      "durationMs": 101282,
+      "resultPreview": "{\"direct_answer\":\"Partial, leaning no — and definitely not \\\"free\\\" in the way the framing hopes. There is no SUPPORTED path that runs the full native architecture (full-attention agent + YOUR corpus RAG, i.e. what got 3/6) on a Copilot-billed or free model surface at zero marginal cost. Two honest catches kill the clean answer: (1) Copilot code review CAN now do the agentic+retrieval architecture…"
+    }
+  ],
+  "totalTokens": 217989,
+  "totalToolCalls": 36
+}

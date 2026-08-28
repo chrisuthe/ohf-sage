@@ -1,0 +1,235 @@
+{
+  "summary": "Determine whether the Copilot cloud/coding agent (org-Copilot-billed, app-triggered) can run the Sage review — post structured findings + grep a corpus — vs the Copilot CLI path",
+  "agentCount": 3,
+  "logs": [],
+  "result": {
+    "research": [
+      {
+        "topic": "Cloud agent as CI reviewer",
+        "summary": "There is no single \"copilot cloud agent\" action that reviews PRs out of the box, but there IS an official, supported path that matches every requirement: **GitHub Agentic Workflows (`gh-aw`)**, in technical preview since Feb 2026. You write a Markdown workflow into `.github/workflows/`, compile it with the `gh aw` CLI extension, and it runs the GitHub Copilot CLI inside a normal GitHub Actions run. It is a first-class documented use case to run these as PR-REVIEW workflows: the agent reads the diff + repo, then posts a structured review via the `create-pull-request-review-comment` and `submit-pull-request-review` \"safe outputs\" (inline comments + a submitted review). Crucially, with `permissions: { copilot-requests: write }` it authenticates Copilot inference using the built-in ephemeral GitHub Actions token — NO personal Copilot-seat PAT — and billing flows through the ORG's Copilot plan. The agent has full shell/file access in the checked-out repo (examples use awk/grep in pre-fetch steps), so it can grep a ~6MB corpus file directly with no MCP required. This is distinct from, and better-fitting than, two other paths: (a) the raw Copilot cloud-agent Tasks API (assign-issue / POST-prompt), which is built to AUTHOR code and open a PR, whose stated job is create_pull_request, and which only accepts USER-to-server tokens (PAT/OAuth/GitHub App *user* token) — GitHub App installation tokens are explicitly unsupported, so it needs a user identity; and (b) the built-in \"Copilot\" code-review reviewer (request-a-review-from-Copilot), which is simpler and far less customizable/scriptable. For your Sage persona + corpus-grep + org-billed bot reviewer, gh-aw is the recommended mechanism. Caveat: gh-aw is a technical preview and surface may change.",
+        "how_to_invoke_from_ci": "Primary recommendation: **GitHub Agentic Workflows** — the `gh aw` CLI extension (repo github/gh-aw, technical preview announced 2026-02-13). You author a natural-language Markdown workflow in `.github/workflows/*.md`, run `gh aw` to compile it into a standard Actions workflow, and it launches the GitHub Copilot CLI in the Actions runner. Triggers are ordinary Actions triggers: `on: pull_request`, `schedule`, `workflow_dispatch`, or a `command:` comment trigger (e.g. mention to invoke). Under the hood the engine is the **GitHub Copilot CLI** (`copilot -p PROMPT ...`), which is itself officially documented for Actions automation (docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/automate-with-actions). Secondary/lower-level: the **Copilot cloud agent Tasks REST/GraphQL API** (assign an issue to Copilot, or POST a prompt) spins the agent up in an Actions environment and opens a PR — but it is for authoring, not reviewing, and requires a user-to-server token. There is NO github/* marketplace action literally named \"copilot coding agent\"; gh-aw is the official wrapper the user is likely thinking of as the \"copilot cloud agent action.\"",
+        "can_review_and_post": "YES, and it is documented — not off-label — via gh-aw. Code-review is called out as a core gh-aw use case (issue triage, PR reviews, CI-failure analysis). The agent is given broad READ access to the repo/diff, then writes back ONLY through \"safe outputs\": it calls `create-pull-request-review-comment` (queued in outputs.jsonl, one call per inline finding, supports `max`/`max-comments`, `hide-older-comments`) and finally `submit-pull-request-review` once, which collects the queued comments into a single submitted PR review. `reply-to-pull-request-review-comment` also exists. So \"agent as structured reviewer posting inline comments + an overall review\" is a supported, first-class pattern. By contrast, the standalone cloud-agent Tasks API is built to author code (its param is `create_pull_request`) and does not document a review-and-comment mode; and the built-in \"Copilot\" reviewer bot posts reviews but is not a scriptable custom-persona agent.",
+        "auth_and_billing": "YES — this is the strongest fit. In gh-aw with the Copilot (default) engine, set `permissions: { copilot-requests: write }` and it \"uses the GitHub Actions token; no PAT required, billing through your org\" — the token is minted per-run and auto-revoked, and \"Billing flows through the organization's Copilot plan, not an individual user's quota.\" So no per-user Copilot-seat token is needed; inference is charged to the ORG subscription. An optional `COPILOT_GITHUB_TOKEN` (fine-grained PAT with Copilot Requests permission) is only a fallback when org-level billing isn't available. Actions minutes come from the account's normal Actions allowance (shared with all workflows). Billing model in transition: legacy = 1 premium request per agent session + Actions minutes; as of 2026-06-01 GitHub moved Copilot plans to usage-based **AI Credits (AIC)** — gh-aw exposes `max-ai-credits` budgets per run. NOTE the contrast: the separate cloud-agent Tasks API \"only supports user-to-server tokens ... Server-to-server tokens, such as GitHub App installation access tokens, are not supported,\" so that path cannot run as a pure app/bot and would need a user identity — a reason to prefer gh-aw for your no-seat requirement.",
+        "corpus_retrieval": "Direct local grep works — no MCP required. The Copilot CLI supports shell and file tools (e.g. `--allow-tool='shell(git:*)'`, `--allow-tool='write'`). In gh-aw code-review workflows the repo is checked out and agents run shell in pre-fetch steps (documented examples use `awk` to extract stats from files, populate `/tmp/gh-aw/agent/` with diff data), then read those local files. So a ~6MB corpus file committed in the repo (or fetched in a setup step) can be grepped/read directly by the agent's shell/file tools. MCP (GitHub MCP server, custom MCPs, web search, browser tools) is ALSO available and optional — useful if the corpus lives outside the repo — but is not required for a local file. Default posture is read-only with sandboxed execution; writes only via safe outputs.",
+        "custom_agent": "Feasible. gh-aw workflows are natural-language Markdown with YAML frontmatter, so the Sage persona/instructions live in the workflow's Markdown body, and you can pin the engine/model in frontmatter (examples show `copilot/gpt-5.4` and also `claude-sonnet-4.6` — gh-aw supports engines: Copilot [default], Claude via ANTHROPIC_API_KEY, Codex via OPENAI_API_KEY, Gemini via GEMINI_API_KEY). Separately, GitHub's own coding-agent supports `.github/agents/*.agent.md` \"custom agents\" that can be selected when assigning via the Tasks API, but that path carries the user-token constraint noted above. UNVERIFIED from a primary source in this pass: an exact prompt-size/character limit for the Sage instructions in either the gh-aw Markdown body or a `.agent.md` file — flag as an open item to confirm.",
+        "confidence": "high",
+        "limits": [
+          "gh-aw (GitHub Agentic Workflows) is a TECHNICAL PREVIEW (announced 2026-02-13) — frontmatter, safe-output names, and behavior can change; pin versions and re-verify before productionizing.",
+          "Safe outputs create-pull-request-review-comment, submit-pull-request-review, reply-to-pull-request-review-comment do NOT support wildcard repos — you must set an explicit repository or allowed-repos for cross-repo review posting.",
+          "Safe outputs impose caps (e.g. max/max-comments per run, default read-only permissions) — a very large review may be truncated by the configured max.",
+          "The separate Copilot cloud-agent Tasks API only accepts user-to-server tokens; GitHub App installation (server-to-server) tokens are explicitly unsupported, so that path is NOT a pure app-bot with org billing.",
+          "Copilot inference over the org plan requires the org to have enabled the relevant Copilot policy (coding agent / CLI) and to have available AI Credits / premium-request budget; runs also consume shared GitHub Actions minutes.",
+          "Billing is mid-transition: usage-based AI Credits took effect 2026-06-01; annual plans stay on legacy premium-request pricing until renewal — exact per-review cost depends on your plan state."
+        ],
+        "uncertainties": [
+          "Exact prompt/character size limit for the Sage persona in a gh-aw Markdown workflow body or a .github/agents/*.agent.md custom agent — not confirmed from a primary source here.",
+          "Whether the Copilot-engine org-billing path (permissions: copilot-requests: write) is fully covered by the same policy toggles when run as a scheduled/dispatch review vs. an interactive coding-agent task — worth confirming in the org's Copilot policy settings.",
+          "Whether the built-in 'Copilot' code-review reviewer can be auto-requested purely via API/Action without any user token (a re-request-review API gap was raised in community discussion #186152) — the gh-aw path sidesteps this, but the built-in reviewer's CI-trigger story is less certain.",
+          "Post-2026-06-01 exact AI-credit consumption per review run (depends on model choice and plan) — not a fixed published number."
+        ],
+        "citations": [
+          {
+            "url": "https://github.blog/changelog/2026-02-13-github-agentic-workflows-are-now-in-technical-preview/",
+            "key_claim": "GitHub Agentic Workflows (technical preview): write Markdown in .github/workflows/, respond to issue/PR events, run on schedules, dispatch manually, or invoke via comment commands; works with GitHub Copilot CLI (default) or other agents; read-only by default with safe outputs."
+          },
+          {
+            "url": "https://github.github.com/gh-aw/reference/auth/",
+            "key_claim": "With permissions: { copilot-requests: write } gh-aw uses the built-in GitHub Actions token (no PAT required), tokens minted per-run and auto-revoked, and 'Billing flows through the organization's Copilot plan, not an individual user's quota.'"
+          },
+          {
+            "url": "https://deepwiki.com/github/gh-aw/8.4-code-review-workflows",
+            "key_claim": "gh-aw code-review agents access create-pull-request-review-comment and submit-pull-request-review safe outputs (with max-comments/hide-older-comments), read local checked-out files, and run shell (awk) in pre-fetch steps populating /tmp/gh-aw/agent/."
+          },
+          {
+            "url": "https://github.github.com/gh-aw/reference/safe-outputs/",
+            "key_claim": "Safe outputs are a sanitized channel giving the agent broad read access but write only via explicitly declared outputs; create-pull-request-review-comment, reply-to-pull-request-review-comment, submit-pull-request-review require an explicit repository/allowed-repos (no wildcard)."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/automate-with-actions",
+            "key_claim": "Copilot CLI is automated in Actions via 'copilot -p PROMPT'; auth via GITHUB_TOKEN (recommended for org-owned repos) or a PAT with Copilot Requests via COPILOT_GITHUB_TOKEN; supports shell/file tools like --allow-tool='shell(git:*)' and --allow-tool='write'; GitHub recommends Agentic Workflows for added guardrails."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/how-tos/use-copilot-agents/cloud-agent/use-cloud-agent-via-the-api",
+            "key_claim": "The Copilot cloud agent Tasks API creates pull requests (create_pull_request param) and 'only supports user-to-server tokens ... Server-to-server tokens, such as GitHub App installation access tokens, are not supported.'"
+          },
+          {
+            "url": "https://github.blog/changelog/2026-04-27-github-copilot-code-review-will-start-consuming-github-actions-minutes-on-june-1-2026/",
+            "key_claim": "From 2026-06-01, GitHub Copilot code review consumes GitHub Actions minutes; coding-agent runs consume both premium requests/AI credits and shared Actions minutes."
+          },
+          {
+            "url": "https://github.com/orgs/community/discussions/192948",
+            "key_claim": "On 2026-06-01 Copilot plans moved from premium-request counting to usage-based AI Credits billing; annual subscribers remain on premium-request pricing until renewal."
+          },
+          {
+            "url": "https://github.blog/changelog/2025-08-05-copilot-coding-agent-improved-pull-request-review-experience/",
+            "key_claim": "Copilot coding agent can post review comments directly on a PR via MCP so feedback appears on github.com; Copilot can be requested as a PR reviewer (Business/Enterprise)."
+          }
+        ]
+      },
+      {
+        "topic": "Custom agents + Agent HQ invocation",
+        "summary": "GitHub Copilot in 2026 has THREE distinct execution surfaces relevant to running a \"Sage\" reviewer, and it is important not to conflate them:\n\n(A) CUSTOM AGENTS (`.github/agents/*.agent.md`) — real, GA'd, and documented. A Markdown file with YAML frontmatter defines a named agent: `name` (optional, defaults to filename), `description` (required), `tools` (optional restrictive allowlist of tool names/aliases like read/edit/search + MCP tools; omit = full access), `mcp-servers` (MCP config), `model`, and `target` (`vscode` or `github-copilot`). Prompt body max **30,000 characters**. It CAN reference external repo files — docs recommend \"relative links (e.g., `docs/CONTRIBUTING.md`) instead of absolute URLs for files within the repository.\" Once created, custom agents \"become available to Copilot cloud agent on GitHub.com\" plus VS Code, JetBrains, Eclipse, Xcode, and the Copilot CLI (`/agent` command). So YES — a custom .agent.md can define a Sage persona + tool allowlist + MCP servers that the cloud agent runs. CAVEAT on model: the `model` frontmatter field is documented as controlling model selection \"for VS Code, JetBrains, Eclipse, and Xcode\"; the docs do NOT clearly confirm the `model:` field is honored by the cloud agent on github.com (model there is chosen via the task-kickoff model picker / API `model` param instead). Treat per-agent model pinning on the cloud surface as unconfirmed.\n\n(B) CLOUD / CODING AGENT — autonomous agent in an ephemeral GitHub-Actions-powered dev env. Native output is CODE CHANGES ON A BRANCH + a PULL REQUEST (plus implementation plans / research). It is an author, not primarily a reviewer.\n\n(C) COPILOT CODE REVIEW — a SEPARATE product that posts structured inline review comments like a human reviewer. This is the native \"post findings\" path, but it is steered by coding-guidelines + `.github/skills/*/SKILL.md`, NOT by a full custom `.agent.md` persona. So the persona-control you get from a custom agent and the structured-review-comment output you want do not fully overlap in one feature today.\n\nModels: Claude Opus 5 went GA in Copilot on 2026-07-24 for Pro+, Max, Business, and Enterprise, accessible via the cloud agent; Opus 4.8 GA 2026-05-28. A model picker for the cloud agent shipped for Business/Enterprise (Feb 2026) and model selection for Claude/Codex agents on github.com (Apr 2026), chosen at task kickoff.\n\nBilling: cloud agent runs on paid Copilot plans and consumes GitHub Actions minutes + AI credits (premium requests); within included allotments there's no extra charge, overage bills under Usage-Based Billing (launched 2026-06-01). Opus 5 is \"billed at provider API list price under usage-based billing.\"",
+        "how_to_invoke_from_ci": "Two headless paths, both real in 2026:\n\n1) COPILOT CLI IN GITHUB ACTIONS (best fit for a scheduled/dispatched custom-persona reviewer that greps a local corpus). Run `copilot -p \"PROMPT\" --no-ask-user` in a workflow step. `-p` = programmatic/non-interactive mode (\"run the CLI programmatically and exit when the command completes\"); `--no-ask-user` \"prevents the CLI from prompting for user input... important when running in an automated workflow where there is no user to respond.\" Auth via built-in `GITHUB_TOKEN` (recommended) or a PAT with Copilot Requests permission in `COPILOT_GITHUB_TOKEN`. Runs inside the Actions runner, so it has full shell/file/repo tools natively. The CLI supports custom agents (via the `/agent` command); the automate-with-actions doc did not explicitly document an `--agent` flag for headless selection — verify the flag name before relying on it (uncertainty).\n\n2) CLOUD-AGENT TASKS REST API (public preview, added 2026-06-04 for Copilot Pro/Pro+/Max): `POST /agents/repos/{owner}/{repo}/tasks` with a required `prompt` field, plus optional `base_ref`, `model`, and `create_pull_request`. Poll the same API for status: queued, in_progress, completed, failed, timed_out, waiting_for_user. Auth: fine-grained PAT with \"Copilot Requests = Read\" under Account permissions (also classic PAT, OAuth, GitHub App user-to-server tokens). GitHub App INSTALLATION tokens are NOT yet supported — a human credential must stay in the auth chain.\n\n3) Native AUTOMATIONS: create from the repo Agents tab / Copilot app Automations tab; triggers are schedule (hourly/daily/weekly) or \"when an issue is created\" (2026-06-02 changelog). Plus non-headless entry points: assign an issue to Copilot, @copilot mention on a PR/issue, the agents panel, and external integrations (Jira, Azure Boards, Slack).",
+        "can_review_and_post": "Nuanced — depends which surface:\n\n- CLOUD/CODING AGENT: native output is code changes + a PR, NOT a review. It CAN post PR review comments, but only via the GitHub MCP server: \"Copilot can post review comments directly on the PR via MCP, so the feedback appears on github.com.\" So directing the cloud agent to REVIEW and post structured findings is possible but is an MCP-tool-driven side path, not its documented primary behavior — expect it to also want to open/modify a PR. Reliability of \"review only, post structured findings, author nothing\" is not strongly documented.\n\n- COPILOT CODE REVIEW (separate product): this IS the native structured-findings path — its comments \"work like comments from human reviewers,\" posts inline, can pull full PR diff via MCP, read existing comments to avoid duplication, check CI, follow linked issues. It can be automated (auto-review). BUT it is configured through coding guidelines + `.github/skills/*/SKILL.md`, not a full custom `.agent.md` persona with model pinning — so you get structured review output OR full persona control, not cleanly both in one feature.\n\n- COPILOT CLI IN ACTIONS: most controllable for a bespoke Sage reviewer — run a custom agent headlessly, have it read the diff + corpus, and post findings yourself via `gh pr review`/`gh api` or the GitHub MCP server. You own the output format. This is the path that best matches \"REVIEW a PR and post structured findings\" for OHF Sage.",
+        "auth_and_billing": "Cloud agent requires a PAID Copilot plan (Pro/Pro+/Max for the Tasks API; Business/Enterprise for org seats + model picker). It runs on the org's Copilot subscription and consumes GitHub Actions minutes + AI credits (premium requests): \"Within your included GitHub Actions minutes and AI credits, you can use Copilot cloud agent without incurring additional costs.\" Overage bills under Usage-Based Billing (launched 2026-06-01). Opus 4.8 carried a 15X premium-request multiplier until UBB launched; Opus 5 \"is billed at provider API list price under usage-based billing.\" IMPORTANT for an \"org runs it, no user seat\" model: there is NO fully seatless path today — the Tasks API keeps a human credential in the auth chain (fine-grained PAT with Copilot Requests=Read; GitHub App installation tokens not yet supported), so a real user/PAT initiates and premium requests bill against that context/org allowance. Enterprise/Business admins must also enable the relevant model policy (e.g. the Claude Opus policy) in Copilot settings before the model is usable.",
+        "corpus_retrieval": "Copilot CLI in an Actions runner has full shell + filesystem + repo tools in the runner, so it can `grep`/read a local corpus file directly — NO MCP required. The cloud agent runs in its own ephemeral GitHub-Actions-powered dev environment where it \"can explore your code, make changes, execute automated tests and linters\" — so it too can read repo files (including a committed corpus) natively; a custom agent can point at corpus files via relative repo links in its prompt (max 30k chars). MCP is only needed to reach corpus data that lives OUTSIDE the repo/runner (external DB, docs system, etc.). For OHF Sage's model of a committed principles corpus, the CLI-in-Actions path can grep it with no MCP.",
+        "custom_agent": "YES. A `.github/agents/*.agent.md` file (Markdown + YAML frontmatter) can define a named Sage agent with: `name`, `description` (required), `tools` (restrictive allowlist), `mcp-servers`, `model`, `target`. Prompt body limit = 30,000 characters. It can reference external repo files via relative links (e.g. `docs/PRINCIPLES.md`). Custom agents are GA for cloud agent + VS Code + CLI (public preview for JetBrains/Eclipse/Xcode). CAVEAT: the `model` frontmatter is documented as effective in the IDEs (VS Code/JetBrains/Eclipse/Xcode); whether the cloud agent on github.com honors a per-agent `model:` (vs. only the task-kickoff picker / API `model` param) is NOT clearly confirmed in the docs — treat persona-level model pinning on the cloud surface as an open question to test.",
+        "citations": [
+          {
+            "url": "https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/create-custom-agents",
+            "key_claim": "Custom agents are .agent.md files with frontmatter fields name/description/tools/mcp-servers/model/target; prompt max 30,000 characters; tools is a restrictive allowlist; custom agents run within Copilot cloud agent and via CLI /agent."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-custom-agents",
+            "key_claim": "Agent profiles are Markdown files with YAML frontmatter; by default agents access all tools; docs recommend relative links (e.g. docs/CONTRIBUTING.md) for repo files; run on GitHub.com, VS Code, JetBrains/Eclipse/Xcode (public preview), and CLI."
+          },
+          {
+            "url": "https://docs.github.com/copilot/concepts/agents/coding-agent/about-coding-agent",
+            "key_claim": "Cloud agent is triggered by issue assignment, @copilot mention, agents panel, GitHub Actions automations, and external tools; native output is code changes on a branch + a PR; runs in an ephemeral GitHub-Actions env; uses Actions minutes + AI credits with no extra cost within included amounts."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/automate-with-actions",
+            "key_claim": "copilot -p PROMPT runs the CLI non-interactively in Actions; --no-ask-user prevents prompts; auth via GITHUB_TOKEN or COPILOT_GITHUB_TOKEN PAT with Copilot Requests permission."
+          },
+          {
+            "url": "https://byteiota.com/github-copilot-agent-tasks-rest-api/",
+            "key_claim": "Agent Tasks API: POST /agents/repos/{owner}/{repo}/tasks with required prompt plus optional base_ref/model/create_pull_request; fine-grained PAT needs Copilot Requests=Read; GitHub App installation tokens not yet supported; poll states queued/in_progress/completed/failed/timed_out/waiting_for_user."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-06-02-schedule-and-automate-tasks-with-copilot-cloud-agent/",
+            "key_claim": "Cloud agent automations can run on a schedule (hourly/daily/weekly) or when an issue is created, managed from the repo Agents tab or Copilot app Automations tab."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-07-24-claude-opus-5-is-now-available-in-github-copilot/",
+            "key_claim": "Claude Opus 5 GA in Copilot for Pro+, Max, Business, Enterprise; accessible via cloud agent; billed at provider API list price under usage-based billing."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-04-14-model-selection-for-claude-and-codex-agents-on-github-com/",
+            "key_claim": "Model selection available for Claude and Codex agents on github.com; select an Anthropic model when kicking off a task."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-02-19-model-picker-for-copilot-coding-agent-for-copilot-business-and-enterprise-users/",
+            "key_claim": "Model picker for the Copilot coding agent shipped for Copilot Business and Enterprise users."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-05-28-claude-opus-4-8-is-generally-available-for-github-copilot/",
+            "key_claim": "Opus 4.8 GA with a 15X premium request multiplier until Usage-Based Billing launched 2026-06-01; Business/Enterprise admins must enable the Claude Opus policy."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/copilot-code-review",
+            "key_claim": "Copilot code review posts inline comments like a human reviewer; via MCP it can pull the full PR diff, read existing review comments, check CI, and follow linked issues; steered by coding guidelines and .github/skills SKILL.md."
+          }
+        ],
+        "limits": [
+          "Cloud agent's native output is a PR/code, not a review; posting structured review comments requires driving it through the GitHub MCP server, which is a side path rather than documented primary behavior.",
+          "Copilot code review (the native structured-findings product) is configured by coding guidelines + .github/skills/SKILL.md, NOT by a full custom .agent.md persona — you cannot fully express a Sage persona + model pin through the native review product today.",
+          "Custom-agent prompt body capped at 30,000 characters.",
+          "No seatless automation: the Tasks API requires a human credential (PAT); GitHub App installation tokens are not yet supported.",
+          "Custom agents in JetBrains/Eclipse/Xcode are still public preview and subject to change.",
+          "Agent Tasks REST API is public preview (Pro/Pro+/Max noted); enterprise availability/stability may differ."
+        ],
+        "uncertainties": [
+          "Whether the cloud agent on github.com honors the per-agent `model:` frontmatter field, or only the task-kickoff model picker / API `model` param (docs tie `model` to the IDEs).",
+          "Whether the Copilot CLI exposes an explicit headless `--agent` flag to select a custom agent in `copilot -p` runs (the /agent command exists interactively; the automate-with-actions doc did not document a flag).",
+          "How reliably the cloud agent can be constrained to review-only (post findings, author no PR) — not strongly documented.",
+          "Exact org-vs-initiator premium-request accounting for API-triggered runs under Usage-Based Billing.",
+          "Whether custom agents (.agent.md persona) can be attached to the native Copilot code review pipeline, vs. only to the cloud/coding agent and CLI."
+        ],
+        "confidence": "medium"
+      }
+    ],
+    "synth": {
+      "direct_answer": "PARTIAL — and the honest split matters. The literal \"Copilot cloud/coding agent\" (the Tasks API you assign an issue/prompt to) is the WRONG vehicle: (1) it is built to AUTHOR code and open a PR — its documented job param is literally `create_pull_request`; posting a review-only, author-nothing set of findings is an undocumented MCP side-path, not its behavior; and (2) it \"only supports user-to-server tokens… GitHub App installation access tokens are NOT supported.\" So the musicassistant-bot App literally cannot drive it, and a human PAT (a seated identity) must stay in the auth chain — which defeats the whole reason you wanted to leave the CLI. So: cloud/coding-agent-Tasks-API = NO for requirements (a) and (c). BUT the outcome you're actually after — the org's Copilot plan pays, no per-user seat token, structured inline review posted by an app/Actions trigger — IS achievable through a *different, app-triggered* mechanism: GitHub Agentic Workflows (`gh-aw`), or a hand-rolled Copilot-CLI-in-Actions job, run with `permissions: { copilot-requests: write }`. That mints an ephemeral per-run token and bills inference to the ORG's Copilot plan with no PAT. This is the same native architecture you already proved (full-attention agent + shell grep over the 6MB corpus), just re-authed. THE CATCH: that org-billed token only materializes when the workflow runs in an ORG-OWNED repo under the org's Copilot plan (i.e. music-assistant/server upstream) — on your personal `chrisuthe/server` fork you're still back to a seated PAT. And note it isn't the musicassistant-bot App acting as the inference identity; it's the runner's ephemeral GITHUB_TOKEN with copilot-requests scope. gh-aw is also technical preview (Feb 2026), so surface may shift.",
+      "cloud_agent_vs_cli": {
+        "cloud_agent": "Two things wear the 'cloud agent' name; keep them apart. (A) Copilot cloud/coding-agent TASKS API — DISQUALIFIED as a reviewer: native output is code-on-a-branch + a PR (param create_pull_request), review-comment posting only via an MCP side-path with weak 'review-only' guarantees, and it rejects GitHub App installation tokens (user-to-server only) so it can neither run as musicassistant-bot nor drop the per-user identity. Wrong tool. (B) The app/Actions-triggered org-billed path the user is really picturing = gh-aw (GitHub Agentic Workflows) OR plain Copilot-CLI-in-Actions. PROS: `permissions: copilot-requests: write` bills inference to the ORG Copilot plan with NO seated PAT (the exact fix for the CLI's auth pain); PR code-review is a first-class documented gh-aw use case; posts inline comments + a submitted review via safe-outputs; full shell/file access greps the 6MB corpus with no MCP; Sage persona lives in the Markdown body or a .agent.md (30k-char cap); triggers are workflow_dispatch (manual first) then pull_request/comment (auto later) — covers requirement (d). CONS: org-billing only applies in an ORG-OWNED repo, not your personal fork; gh-aw is technical preview (frontmatter/safe-output names can change); safe-output comment posting requires an explicit repo (no wildcard) and imposes max-comment caps that can truncate a big review; per-agent model pinning on the cloud surface is unconfirmed (the --model CLI flag IS proven).",
+        "cli": "What you already built (copilot/cli-reviewer/sage-cli-review.yml + sage.agent.md + sage_post_review.py). PROS: reproduces the PROVEN 3/6-recall native architecture exactly — full-attention Opus, `--allow-tool shell(grep)`+read over the corpus, posts a structured review (inline + summary + closed-PR fallback) through your own sage_post_review.py so YOU own the output format and it never authors code; stable, not a preview; already wired for workflow_dispatch + pull_request. CONS: as written it authenticates with `COPILOT_GITHUB_TOKEN` = a Copilot-LICENSED PAT (a per-user seat token) — precisely the thing you want to avoid. That's not intrinsic to the CLI though: the same `copilot -p` job can adopt `permissions: copilot-requests: write` + the built-in token for org billing WHEN it runs in an org-owned repo. So the CLI's only real deficit vs. the org path is the auth line, not the architecture.",
+        "recommendation": "Do NOT switch to the Copilot cloud/coding-agent Tasks API — it authors instead of reviews and structurally can't run as the bot App. Keep the proven CLI architecture; change only the AUTH. Two-stage plan matching your existing 'prove on fork, then propose upstream' goal: (1) NOW, on chrisuthe/server: keep the current CLI workflow with your personal Copilot PAT to finish proving quality — nothing about the vehicle needs to change to keep validating. (2) UPSTREAM, in music-assistant/server: run the SAME native architecture with `permissions: copilot-requests: write` and the built-in per-run token so the ORG Copilot plan pays and no seat token is needed. Wrap that in gh-aw if you want its documented review-safe-outputs + comment-trigger guardrails, or keep your hand-rolled copilot -p job + sage_post_review.py (more stable than the preview, and you keep control of the finding format). Net: the cloud agent is the wrong noun; the right move is re-authing the CLI/Actions path to org-billed on an org-owned repo."
+      },
+      "build_sketch_if_cloud_agent": "Vehicle = Copilot-CLI-in-Actions (optionally gh-aw-wrapped), org-billed — NOT the Tasks API. Concrete wiring, reusing files you already have:\n\nTRIGGER (requirement d): keep the existing `on: { workflow_dispatch: {inputs: pr}, pull_request: [opened, synchronize, reopened] }` from sage-cli-review.yml. Manual dispatch first; the pull_request trigger flips it to automatic with no code change.\n\nAUTH (the one real change): drop `COPILOT_GITHUB_TOKEN: secrets.COPILOT_GITHUB_TOKEN` and instead declare `permissions: { contents: read, pull-requests: write, copilot-requests: write }`. With copilot-requests:write the runner's built-in ephemeral GITHUB_TOKEN authenticates Copilot inference and billing flows to the org's Copilot plan — no seated PAT. HARD REQUIREMENT: the workflow must live in an ORG-OWNED repo (music-assistant/server) with the org's Copilot coding-agent/CLI policy enabled and AI-credit budget available; on the personal fork this scope won't bill the org and you fall back to a personal seat.\n\nCORPUS (requirement b): keep the current setup step — `gh release download --repo chrisuthe/ohf-sage --pattern ohf-sage-corpus.jsonl` (and ohf-sage.md) into the runner cwd; the agent greps it via `--allow-tool 'shell(grep:*)'`+read. No MCP. (For upstream you'd point the release download at wherever the corpus ships, or commit it.)\n\nPERSONA (requirement a, review-not-author): reuse copilot/cli-reviewer/sage.agent.md (or the ohf-sage.md fetched from the Release) — under the 30k-char .agent.md cap. Prompt already constrains output to a findings JSON array; the agent has read/grep/cat only, so it structurally cannot author code.\n\nINFERENCE: `copilot -p \"$(cat prompt.txt)\" -s --model claude-opus-4.8 --allow-tool 'shell(grep:*)' --allow-tool 'shell(cat:*)' --allow-tool read --no-ask-user | tee findings.json` — unchanged. (--model is proven on the CLI; don't rely on per-agent model pinning on any cloud surface.)\n\nPOSTING (requirement a): keep sage_post_review.py — it already does inline review comments + summary + closed-PR fallback via `gh api pulls/{pr}/reviews`, labeled AI-generated, advisory not a gate. This is preferable to gh-aw safe-outputs because you keep the exact format and dodge the safe-output max-comment truncation + no-wildcard-repo constraint. If you DO adopt gh-aw, swap the post step for `create-pull-request-review-comment` (one per finding, mind the max) + a single `submit-pull-request-review`, with an explicit `repository:` set.\n\nIf gh-aw-wrapped: author the same thing as a `.github/workflows/sage.md` (persona in the Markdown body, engine: copilot default), `gh aw` compiles it to a standard Actions workflow; you get the documented review pattern + comment-command trigger for free, at the cost of preview churn.",
+      "open_questions_for_user": [
+        "Does the music-assistant GitHub org actually have a Copilot plan with AI-credit/premium-request budget, and is the coding-agent/CLI policy toggled on? The whole org-billed, no-seat path is moot without it — worth confirming in the org's Copilot policy settings before building.",
+        "Where will this run when you want org billing — upstream music-assistant/server, or your personal chrisuthe/server fork? `copilot-requests: write` + built-in token only bills the org in an ORG-OWNED repo; on the fork you're still on a personal seat. Your stated end-goal (review every contributor's PR upstream) points at the org repo, which resolves this cleanly.",
+        "Are you willing to depend on gh-aw while it's technical preview (frontmatter/safe-output names can change), or do you prefer the more stable hand-rolled copilot -p + sage_post_review.py job and treat gh-aw as optional sugar? Both hit the same org-billing auth; only the guardrails/preview-risk differ.",
+        "Confirm the org is OK with the safe-output constraints IF you go gh-aw: explicit repo (no wildcard) for review-comment posting and a max-comments cap that can truncate a comprehensive Sage review (your native reviews run 6-9 findings/PR). Your own sage_post_review.py has no such cap.",
+        "Do you want to keep proving quality on the fork with your personal Copilot PAT in parallel, while wiring the org-billed variant for upstream — or pause fork testing until the upstream vehicle is decided?"
+      ]
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Research"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Synthesize"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "research:cloud-agent-invoke",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "ae48742d7de2e61d5",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785515428100,
+      "queuedAt": 1785515425156,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Cloud agent as CI reviewer",
+      "promptPreview": "You have web access but must load the tools first: call ToolSearch with query \"select:WebSearch,WebFetch\", then use them. Prefer OFFICIAL sources (docs.github.com, github.blog, github.com/actions) and 2026 material — Copilot agent tooling changes monthly, flag anything older as possibly stale. Cite the source URL and quote the key sentence for every non-obvious claim. Flag anything you cannot conf…",
+      "lastProgressAt": 1785515627836,
+      "tokens": 58780,
+      "toolCalls": 14,
+      "durationMs": 199736,
+      "resultPreview": "{\"topic\":\"Cloud agent as CI reviewer\",\"summary\":\"There is no single \\\"copilot cloud agent\\\" action that reviews PRs out of the box, but there IS an official, supported path that matches every requirement: **GitHub Agentic Workflows (`gh-aw`)**, in technical preview since Feb 2026. You write a Markdown workflow into `.github/workflows/`, compile it with the `gh aw` CLI extension, and it runs the Gi…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "research:custom-agents-hq",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "af8b34fc53ee98ee9",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785515427810,
+      "queuedAt": 1785515425156,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Custom agents + Agent HQ invocation",
+      "promptPreview": "You have web access but must load the tools first: call ToolSearch with query \"select:WebSearch,WebFetch\", then use them. Prefer OFFICIAL sources (docs.github.com, github.blog, github.com/actions) and 2026 material — Copilot agent tooling changes monthly, flag anything older as possibly stale. Cite the source URL and quote the key sentence for every non-obvious claim. Flag anything you cannot conf…",
+      "lastProgressAt": 1785515596638,
+      "tokens": 55624,
+      "toolCalls": 13,
+      "durationMs": 168828,
+      "resultPreview": "{\"topic\":\"Custom agents + Agent HQ invocation\",\"summary\":\"GitHub Copilot in 2026 has THREE distinct execution surfaces relevant to running a \\\"Sage\\\" reviewer, and it is important not to conflate them:\\n\\n(A) CUSTOM AGENTS (`.github/agents/*.agent.md`) — real, GA'd, and documented. A Markdown file with YAML frontmatter defines a named agent: `name` (optional, defaults to filename), `description` (…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "synthesize:agent-vs-cli",
+      "phaseIndex": 2,
+      "phaseTitle": "Synthesize",
+      "agentId": "aeee2203fbe14cae6",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785515632660,
+      "queuedAt": 1785515629513,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "PARTIAL — and the honest split matters. The literal \"Copilo…",
+      "promptPreview": "Decide whether to run the OHF Sage reviewer via the Copilot CLOUD/CODING AGENT (org-Copilot-billed, app-triggered — the user's suggestion) instead of the Copilot CLI (which needs a per-user Copilot-seat token).\n\nRequirements the vehicle must meet: (a) POST a structured review (verdict + cited findings, ideally inline comments) on a PR — NOT author code; (b) grep/read a ~6MB mined-review corpus for…",
+      "lastProgressAt": 1785515766565,
+      "tokens": 62673,
+      "toolCalls": 7,
+      "durationMs": 133905,
+      "resultPreview": "{\"direct_answer\":\"PARTIAL — and the honest split matters. The literal \\\"Copilot cloud/coding agent\\\" (the Tasks API you assign an issue/prompt to) is the WRONG vehicle: (1) it is built to AUTHOR code and open a PR — its documented job param is literally `create_pull_request`; posting a review-only, author-nothing set of findings is an undocumented MCP side-path, not its behavior; and (2) it \\\"only…"
+    }
+  ],
+  "totalTokens": 177077,
+  "totalToolCalls": 34
+}

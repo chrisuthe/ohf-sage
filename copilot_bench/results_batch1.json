@@ -1,0 +1,197 @@
+[
+  {
+    "idx": 4,
+    "config": "c0",
+    "pr": 4,
+    "repo": "music-assistant/server",
+    "src_pr": 3002,
+    "author": "OzGav",
+    "ground_truth": "Why would content type be MP3 here if lossless was selected in the config?",
+    "path": "music_assistant/providers/yandex_music/parsers.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis PR introduces a new **Yandex Music** streaming provider for Music Assistant (beta-stage), including API client integration, media-item parsing, and HTTP stream URL resolution. Note: the PR description states this is a benchmark repro for `music-assistant/server#3002`, which does not match the actual scope (new provider implementation).\n\n**Changes:**\n- Add `YandexMusicProvider` with library/search endpoints and streaming integration.\n- Add Yandex API client wrapper plus parsers to map Yandex API objects to Music Assistant models.\n- Add provider manifest/config flow (token + quality selection) and streaming URL selection logic.\n\n### Reviewed changes\n\nCopilot reviewed 7 out of 7 changed files in this pull request and generated 4 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| music_assistant/providers/yandex_music/streaming.py | Streaming manager that resolves direct track URLs and maps codec/bitrate into `StreamDetails`. |\r\n| music_assistant/providers/yandex_music/provider.py | Main provider implementation: init/unload, search, library retrieval, playlist/album/artist fetches, and stream-details delegation. |\r\n| music_assistant/providers/yandex_music/parsers.py | Converts Yandex API objects (artist/album/track/playlist) into Music Assistant models and metadata/images. |\r\n| music_assistant/providers/yandex_music/manifest.json | Declares the new provider, requirements, and metadata. |\r\n| music_assistant/providers/yandex_music/constants.py | Adds config keys, quality constants, image-size constants, and TTL constants. |\r\n| music_assistant/providers/yandex_music/api_client.py | Wraps `yandex_music` async client with convenience methods and error handling. |\r\n| music_assistant/providers/yandex_music/__init__.py | Provider setup entrypoint and config-flow entries (token + quality, reset auth action). |\n</details>\n\n\n\n\n\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-4-c0-base?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.",
+      "comments": [
+        {
+          "path": "music_assistant/providers/yandex_music/provider.py",
+          "line": 299,
+          "body": "`get_playlist_tracks` ignores the `page` argument and always returns the full playlist. The playlists controller paginates until an empty page is returned (see `music_assistant/controllers/media/playlists.py:92-105`), so this will keep returning non-empty results for every page and can cause an infinite loop/hang when iterating playlist tracks."
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/api_client.py",
+          "line": 151,
+          "body": "`YandexMusicClient.search` takes a `limit` argument but does not use it, which is likely to be flagged by the linter and is misleading in the docstring. Either wire it into the API call (if supported) or explicitly mark/document that it\u2019s handled by the caller."
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/streaming.py",
+          "line": 41,
+          "body": "`provider.get_track()` is annotated to return `Track` and raises `MediaNotFoundError` when a track is missing, so the `if not track:` branch is effectively dead code and makes control flow harder to follow."
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/provider.py",
+          "line": 3,
+          "body": "The PR description says this is a benchmark reproduction of music-assistant/server#3002 and \u201csafe to close\u201d, but the diff adds a full new Yandex Music provider implementation (multiple new modules + manifest). Please align the PR description/scope with the actual changes (or split the benchmark repro into a separate PR)."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 4,
+    "config": "c1",
+    "pr": 5,
+    "repo": "music-assistant/server",
+    "src_pr": 3002,
+    "author": "OzGav",
+    "ground_truth": "Why would content type be MP3 here if lossless was selected in the config?",
+    "path": "music_assistant/providers/yandex_music/parsers.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis pull request introduces a new **Yandex Music** music provider implementation for Music Assistant, including API access, model parsing, streaming URL resolution, and provider configuration/manifest wiring.\n\n**Changes:**\n- Added Yandex Music provider implementation (`api_client`, `provider`, `parsers`, `streaming`) to support library browsing/search and track streaming.\n- Added provider configuration flow and metadata (`__init__.py`, `constants.py`, `manifest.json`).\n- Added OHF Sage skill documentation under `.github/skills/ohf-sage/`.\n\n### Reviewed changes\n\nCopilot reviewed 9 out of 9 changed files in this pull request and generated 11 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| music_assistant/providers/yandex_music/__init__.py | Provider setup + config-entry flow (token + quality selection). |\r\n| music_assistant/providers/yandex_music/api_client.py | Async wrapper around `yandex_music` client for library/search/stream endpoints. |\r\n| music_assistant/providers/yandex_music/constants.py | Provider constants (config keys, quality options, cache TTLs, image sizes). |\r\n| music_assistant/providers/yandex_music/manifest.json | Provider manifest metadata + dependency pin. |\r\n| music_assistant/providers/yandex_music/parsers.py | Yandex API object \u2192 Music Assistant model parsing (artist/album/track/playlist). |\r\n| music_assistant/providers/yandex_music/provider.py | MusicProvider implementation: search, library access, playlist/album retrieval, streaming delegation. |\r\n| music_assistant/providers/yandex_music/streaming.py | StreamDetails generation from Yandex download info + quality selection. |\r\n| .github/skills/ohf-sage/SKILL.md | Adds skill metadata/readme for OHF Sage review principles. |\r\n| .github/skills/ohf-sage/principles.md | Adds the OHF/Music Assistant principles reference used by the skill. |\n</details>\n\n\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (5)</summary>\n\n**music_assistant/providers/yandex_music/api_client.py:187**\n* This exception handler logs the error but returns an empty list, which silently turns provider/API failures into \u201cno results\u201d and can lead to incomplete library/playlist sync.\n\n(Principle: don\u2019t swallow errors/collapse into None/bool \u2014 https://github.com/music-assistant/server/pull/3722#discussion_r3106867386)\n```\n        except (BadRequestError, NetworkError) as err:\n            LOGGER.error(\"Error fetching tracks: %s\", err)\n            return []\n```\n**music_assistant/providers/yandex_music/api_client.py:201**\n* Same as get_track/get_tracks: returning None on API/network errors will be misclassified upstream as \u201calbum not found\u201d, which is incorrect and makes outages harder to debug.\n\n(Principle: don\u2019t swallow errors \u2014 https://github.com/music-assistant/server/pull/1214#discussion_r1557137671)\n```\n        except (BadRequestError, NetworkError) as err:\n            LOGGER.error(\"Error fetching album %s: %s\", album_id, err)\n            return None\n```\n**music_assistant/providers/yandex_music/streaming.py:49**\n* This reads a hardcoded config key (\"quality\"). Prefer using the provider constant (CONF_QUALITY) so renames are type-checked and consistent.\n```\n        quality = self.provider.config.get_value(\"quality\")\n```\n**music_assistant/providers/yandex_music/streaming.py:117**\n* Defaulting unknown codecs to MP3 can mislead the stream pipeline. Prefer ContentType.UNKNOWN so ffmpeg can detect the container/codec.\n\n(Principle: StreamDetails audio-quality fields must be accurate \u2014 https://github.com/music-assistant/server/pull/2295#discussion_r2262410742)\n```\n        # Default to MP3 for unknown codecs\n        return ContentType.MP3\n```\n**music_assistant/providers/yandex_music/provider.py:369**\n* Avoid broad `except Exception` when parsing library items; it can hide real bugs. Catch only expected parse/data errors.\n\n(Principle: catch specific exception types \u2014 https://github.com/music-assistant/server/pull/3096#discussion_r2768368356)\n```\n                try:\n                    yield parse_track(self, track)\n                except Exception as err:\n                    self.logger.debug(\"Error parsing library track: %s\", err)\n```\n</details>\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-4-c1-base?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.",
+      "comments": [
+        {
+          "path": "music_assistant/providers/yandex_music/manifest.json",
+          "line": 5,
+          "body": "The PR description says this is a benchmark repro (\u201cSafe to close\u201d), but this change set adds an entire new Yandex Music provider (plus supporting code). Please clarify whether this is intended, or adjust the PR title/description/scope to match.\n\n(Principle: keep PRs small/single-purpose \u2014 https://github.com/music-assistant/server/pull/2911#discussion_r2751214136)"
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/api_client.py",
+          "line": 173,
+          "body": "This exception handler logs the error but then returns None, which makes callers interpret network/API failures as \u201cnot found\u201d (e.g., provider.py will raise MediaNotFoundError). That hides outages and produces incorrect errors.\n\n(Principle: don\u2019t swallow errors/collapse into None/bool \u2014 https://github.com/music-assistant/server/pull/1214#discussion_r1557137671)\n\nThis issue also appears in the following locations of the same file:\n- line 185\n- line 199"
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/api_client.py",
+          "line": 155,
+          "body": "The `limit` parameter is documented and passed through from the provider, but it isn\u2019t used in the underlying `client.search(...)` call, so it doesn\u2019t actually affect the API request size/payload. Either remove the parameter (and update callers) or apply it via the yandex-music API if supported."
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/streaming.py",
+          "line": 12,
+          "body": "Use the shared CONF_QUALITY constant instead of a hardcoded config key, to avoid drift with the provider\u2019s config schema.\n\nThis issue also appears on line 49 of the same file."
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/streaming.py",
+          "line": 16,
+          "body": "`_select_best_quality` is missing type annotations (strict mypy is enabled in this repo), but adding them requires importing DownloadInfo for TYPE_CHECKING. Add a typing-only import here so the method can be fully typed."
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/streaming.py",
+          "line": 73,
+          "body": "This helper is untyped (no arg/return types). With strict mypy (disallow_untyped_defs=true), this will fail type-checking. Add proper typing for DownloadInfo and the return value."
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/streaming.py",
+          "line": 109,
+          "body": "For StreamDetails, the audio format must be accurate because it drives the playback pipeline. If the codec is missing, returning MP3 is a guess; use ContentType.UNKNOWN instead and let ffmpeg/sniffing determine it.\n\n(Principle: StreamDetails audio-quality fields must be accurate \u2014 https://github.com/music-assistant/server/pull/626#discussion_r1168251023)\n\nThis issue also appears on line 116 of the same file."
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/provider.py",
+          "line": 287,
+          "body": "The `page` parameter is currently ignored, so repeated calls for page>0 will return the same full playlist contents and may load very large playlists into memory. Implement simple paging (e.g., page_size+offset) like other providers do."
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/provider.py",
+          "line": 147,
+          "body": "Avoid broad `except Exception` here; it can mask unexpected bugs and makes debugging hard. Catch only expected parse/data-shape errors (e.g., KeyError/TypeError/ValueError/AttributeError) and consider logging with exc_info.\n\n(Principle: catch specific exception types \u2014 https://github.com/music-assistant/server/pull/3096#discussion_r2768368356)\n\nThis issue also appears on line 366 of the same file."
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/__init__.py",
+          "line": 71,
+          "body": "These ConfigEntry labels/descriptions are hardcoded user-facing strings. Project guidance prefers routing UI text through the translation system rather than embedding English strings directly.\n\n(Principle: use strings.json/translation_key for UI strings \u2014 https://github.com/music-assistant/server/pull/4462#discussion_r3486751116)"
+        },
+        {
+          "path": "music_assistant/providers/yandex_music/parsers.py",
+          "line": 209,
+          "body": "This PR introduces a complete new provider (API client, parsers, streaming manager) but does not add any unit tests. There is existing provider test infrastructure under tests/providers/ (e.g., tidal/jellyfin). Consider adding parser unit tests (fixtures \u2192 parse_* output) and a small streaming quality-selection test for _select_best_quality/_get_content_type."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 6,
+    "config": "c0",
+    "pr": 6,
+    "repo": "music-assistant/server",
+    "src_pr": 2364,
+    "author": "marcelveldt",
+    "ground_truth": "this is weird... so a group player is suddenly going to be included here ? Let's not do that.",
+    "path": "music_assistant/controllers/players.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis PR adjusts player/group state propagation to better reflect changes in group membership and volume synchronization, intended as part of a benchmark repro for music-assistant/server#2364.\n\n**Changes:**\n- Trigger state updates for players removed from a group when a group\u2019s `group_members` changes.\n- Trigger a sync-leader state refresh when a synced child\u2019s `volume_level` changes (to keep `group_volume` accurate).\n- Ensure `iter_group_members(..., exclude_self=False)` always includes the group player itself.\n\n### Reviewed changes\n\nCopilot reviewed 2 out of 2 changed files in this pull request and generated no comments.\n\n| File | Description |\n| ---- | ----------- |\n| music_assistant/models/player.py | Propagates state updates to removed group members and sync leader when relevant state fields change. |\n| music_assistant/controllers/players.py | Adjusts group-member iteration to optionally include the group player itself. |\n\n\n\n\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-6-c0-base?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.",
+      "comments": []
+    }
+  },
+  {
+    "idx": 6,
+    "config": "c1",
+    "pr": 7,
+    "repo": "music-assistant/server",
+    "src_pr": 2364,
+    "author": "marcelveldt",
+    "ground_truth": "this is weird... so a group player is suddenly going to be included here ? Let's not do that.",
+    "path": "music_assistant/controllers/players.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis PR adjusts player/group state propagation in the Music Assistant server, likely to address stale state edge-cases around grouping/ungrouping and group volume calculations.\n\n**Changes:**\n- Update `Player.update_state` to trigger state refreshes for removed group members and for sync leaders when a synced child\u2019s volume changes.\n- Adjust `PlayersController.iter_group_members` to work on a copy of the group member list and optionally ensure the group player itself is included.\n- Add the OHF Sage skill documentation files into the repository.\n\n### Reviewed changes\n\nCopilot reviewed 4 out of 4 changed files in this pull request and generated 1 comment.\n\n| File | Description |\n| ---- | ----------- |\n| `music_assistant/models/player.py` | Adds follow-up state updates for removed group members and sync leaders on volume change. |\n| `music_assistant/controllers/players.py` | Makes group-member iteration safer and ensures the group player can be included when requested. |\n| `.github/skills/ohf-sage/SKILL.md` | Adds skill metadata and usage guidance for OHF Sage. |\n| `.github/skills/ohf-sage/principles.md` | Adds the OHF/Music Assistant principles reference document. |\n\n\n\n\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-6-c1-base?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.",
+      "comments": [
+        {
+          "path": "music_assistant/models/player.py",
+          "line": 1008,
+          "body": "`removed_members` can include the current player ID when a group is dissolved (e.g., previous members included the leader but new members becomes empty). That would call `self.update_state()` recursively and can lead to unbounded recursion on the event loop."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 11,
+    "config": "c0",
+    "pr": 8,
+    "repo": "music-assistant/server",
+    "src_pr": 1214,
+    "author": "marcelveldt",
+    "ground_truth": "this is not good, we should not have to deal with aiohttp errors here. It sup to the provider to handle (un)expected errors and raise one of the exceptions derived from MusicAssistantError. Do not swallow unhandled excep",
+    "path": "music_assistant/server/controllers/music.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nAdds a fast-path to `music/search` so that when a user pastes a public share URL (e.g., Spotify/Qobuz), the controller attempts to resolve it directly to a single media item instead of performing a full cross-provider text search.\n\n**Changes:**\n- Detect and parse shareable provider URLs in `MusicController.search`, and short-circuit to `get_item`.\n- Handle provider request errors by returning empty `SearchResults` for that fast-path.\n- Introduce a `PROVIDERS_WITH_SHAREABLE_URLS` constant to gate which providers support this behavior.\n\n### Reviewed changes\n\nCopilot reviewed 2 out of 2 changed files in this pull request and generated 2 comments.\n\n| File | Description |\n| ---- | ----------- |\n| music_assistant/server/controllers/music.py | Adds share-URL detection and direct item fetch in the search endpoint. |\n| music_assistant/constants.py | Adds a provider allowlist for shareable URL handling. |\n\n\n\n\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-11-c0-base?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.",
+      "comments": [
+        {
+          "path": "music_assistant/server/controllers/music.py",
+          "line": 170,
+          "body": "`parse_uri` can raise `IndexError` for malformed `https://open.*` URLs (because it indexes split segments without guarding). Also, `MediaType(media_type_str)` returns `MediaType.UNKNOWN` for unsupported types (e.g. Spotify show/episode URLs), which will lead to `get_item()` calling `get_controller()` with `UNKNOWN` and crashing (AttributeError) since `get_controller` returns `None` for unknown media types. Guard against these cases and only short-circuit when the parsed media_type is supported and included in the requested `media_types`."
+        },
+        {
+          "path": "music_assistant/constants.py",
+          "line": 100,
+          "body": "New constant should follow the module\u2019s existing typing pattern for exported constants (use `Final[...]`) to keep type-checking consistent."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 11,
+    "config": "c1",
+    "pr": 9,
+    "repo": "music-assistant/server",
+    "src_pr": 1214,
+    "author": "marcelveldt",
+    "ground_truth": "this is not good, we should not have to deal with aiohttp errors here. It sup to the provider to handle (un)expected errors and raise one of the exceptions derived from MusicAssistantError. Do not swallow unhandled excep",
+    "path": "music_assistant/server/controllers/music.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis PR appears to be a benchmark/reproduction branch for music-assistant/server#1214, but it also introduces a runtime behavior change in the MusicController search flow to resolve public share URLs (e.g., Spotify/Qobuz) into a direct item lookup.\n\n**Changes:**\n- Add special-casing in `MusicController.search` to detect provider share URLs and return the resolved item as a `SearchResults` hit.\n- Introduce a `PROVIDERS_WITH_SHAREABLE_URLS` constant to gate which providers get this share-URL resolution behavior.\n- Add OHF Sage review-skill documentation under `.github/skills/ohf-sage/`.\n\n### Reviewed changes\n\nCopilot reviewed 4 out of 4 changed files in this pull request and generated 2 comments.\n\n| File | Description |\n| ---- | ----------- |\n| music_assistant/server/controllers/music.py | Adds share-URL parsing/early-resolution inside the `music/search` API handler. |\n| music_assistant/constants.py | Adds a provider allowlist for shareable URLs. |\n| .github/skills/ohf-sage/SKILL.md | Adds skill metadata/documentation for PR review guidance. |\n| .github/skills/ohf-sage/principles.md | Adds the cited principles/ruleset used by the skill. |\n\n\n\n\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-11-c1-base?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.",
+      "comments": [
+        {
+          "path": "music_assistant/server/controllers/music.py",
+          "line": 165,
+          "body": "The PR description says this is a benchmark repro and \"Safe to close\", but this adds a production behavior change to the `music/search` API path (share-URL resolution) plus a new constant. If this branch is only meant for benchmarking, please drop these runtime changes or move them to a dedicated PR with an updated description (see the \"single-purpose PR\" guidance: https://github.com/music-assistant/server/pull/2911#discussion_r2751214136)."
+        },
+        {
+          "path": "music_assistant/server/controllers/music.py",
+          "line": 177,
+          "body": "[PROBLEM] This catches *all* `MusicAssistantError` (including auth/setup/provider availability problems) plus `ClientResponseError` and then silently returns an empty `SearchResults`, which can hide real failures from callers. This conflicts with the project guidance to (1) catch only specific, expected exception types and (2) not swallow unexpected errors (see https://github.com/music-assistant/server/pull/3096#discussion_r2768368356 and https://github.com/music-assistant/server/pull/1214#discussion_r1557137671). Consider only returning empty results for true \"not found\" cases and letting other errors propagate."
+        }
+      ]
+    }
+  }
+]

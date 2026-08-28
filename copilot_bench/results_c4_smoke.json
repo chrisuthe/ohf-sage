@@ -1,0 +1,155 @@
+[
+  {
+    "idx": 0,
+    "config": "c4",
+    "pr": 26,
+    "repo": "music-assistant/server",
+    "src_pr": 3334,
+    "author": "MarvinSchenkel",
+    "ground_truth": "I don't think we need all those `getattr`s here? Looks like `synced_to_internal` is a property anyway.",
+    "path": "music_assistant/providers/samsung_wam/features/grouping/coordinator.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nReproduces the Samsung WAM player-provider integration, adding discovery, playback, state synchronization, grouping, and device controls.\n\n**Changes:**\n- Adds Samsung WAM discovery and player lifecycle support.\n- Implements playback, volume, source selection, grouping, and synchronization.\n- Adds provider dependencies, metadata, icons, and repository review guidance.\n\n### Reviewed changes\n\nCopilot reviewed 32 out of 35 changed files in this pull request and generated 12 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `requirements_all.txt` | Adds pywam dependency. |\r\n| `music_assistant/providers/samsung_wam/provider.py` | Defines provider lifecycle. |\r\n| `music_assistant/providers/samsung_wam/player.py` | Implements WAM player interface. |\r\n| `music_assistant/providers/samsung_wam/manifest.json` | Declares provider metadata. |\r\n| `music_assistant/providers/samsung_wam/icon.svg` | Adds default icon. |\r\n| `music_assistant/providers/samsung_wam/icon_monochrome.svg` | Adds monochrome icon. |\r\n| `music_assistant/providers/samsung_wam/icon_dark.svg` | Adds dark-theme icon. |\r\n| `music_assistant/providers/samsung_wam/features/volume/handler.py` | Implements volume controls. |\r\n| `music_assistant/providers/samsung_wam/features/volume/__init__.py` | Defines volume package. |\r\n| `music_assistant/providers/samsung_wam/features/state_sync/models.py` | Defines state snapshot model. |\r\n| `music_assistant/providers/samsung_wam/features/state_sync/mapper.py` | Maps device state to MA. |\r\n| `music_assistant/providers/samsung_wam/features/state_sync/handler.py` | Handles polling and reconnection. |\r\n| `music_assistant/providers/samsung_wam/features/state_sync/consts.py` | Defines synchronization timing. |\r\n| `music_assistant/providers/samsung_wam/features/state_sync/__init__.py` | Defines state-sync package. |\r\n| `music_assistant/providers/samsung_wam/features/playback/models.py` | Defines playback enums. |\r\n| `music_assistant/providers/samsung_wam/features/playback/handler.py` | Implements playback commands. |\r\n| `music_assistant/providers/samsung_wam/features/playback/consts.py` | Defines playback timeout. |\r\n| `music_assistant/providers/samsung_wam/features/playback/__init__.py` | Defines playback package. |\r\n| `music_assistant/providers/samsung_wam/features/grouping/handler.py` | Sends grouping commands. |\r\n| `music_assistant/providers/samsung_wam/features/grouping/coordinator.py` | Coordinates group membership. |\r\n| `music_assistant/providers/samsung_wam/features/grouping/consts.py` | Defines grouping task settings. |\r\n| `music_assistant/providers/samsung_wam/features/grouping/__init__.py` | Defines grouping package. |\r\n| `music_assistant/providers/samsung_wam/features/discovery/ssdp_listener.py` | Implements SSDP discovery. |\r\n| `music_assistant/providers/samsung_wam/features/discovery/models.py` | Defines discovery models. |\r\n| `music_assistant/providers/samsung_wam/features/discovery/handler.py` | Probes and registers speakers. |\r\n| `music_assistant/providers/samsung_wam/features/discovery/consts.py` | Defines discovery settings. |\r\n| `music_assistant/providers/samsung_wam/features/discovery/__init__.py` | Defines discovery package. |\r\n| `music_assistant/providers/samsung_wam/features/device_config/handler.py` | Implements device renaming. |\r\n| `music_assistant/providers/samsung_wam/features/device_config/__init__.py` | Defines device-config package. |\r\n| `music_assistant/providers/samsung_wam/features/base.py` | Adds handler bases and retries. |\r\n| `music_assistant/providers/samsung_wam/features/__init__.py` | Defines feature package. |\r\n| `music_assistant/providers/samsung_wam/exceptions.py` | Adds provider exception. |\r\n| `music_assistant/providers/samsung_wam/consts.py` | Defines features and configuration. |\r\n| `music_assistant/providers/samsung_wam/__init__.py` | Sets up provider and logging. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds repository review guidance. |\n</details>\n\n\n\n\n\n<details>\n<summary>Suppressed comments (1)</summary>\n\n**music_assistant/providers/samsung_wam/features/discovery/handler.py:180**\n* `connect()` runs before the cleanup block, so a connection/listener-start failure bypasses local handling and can abort manual discovery before the periodic probe starts; move it inside the `try` so the temporary client is always disconnected.\n```\n        temp_speaker = Speaker(info.ip_address)\n        await temp_speaker.connect()\n\n        try:\n            await temp_speaker.update()\n```\n</details>\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-0-c4-base?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": "music_assistant/providers/samsung_wam/features/discovery/handler.py",
+          "line": 127,
+          "body": "An existing player ignores the newly discovered IP address, so after a DHCP address change every reconnect continues targeting the stale address; update the player's endpoint and IP identifier, disconnecting/reconnecting when the address changes.\n\nThis issue also appears on line 176 of the same file."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/consts.py",
+          "line": 23,
+          "body": "The player advertises native next/previous support but implements neither `next_track` nor `previous_track` and marks every source as unable to skip, leaving the capability inconsistent; remove this feature unless the commands and applicable source flags are implemented."
+        },
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 5,
+          "body": "This repository-wide generated review policy is unrelated to the Samsung WAM provider and materially changes future reviews; remove it from this PR and submit it separately per the single-purpose PR standard."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/features/state_sync/mapper.py",
+          "line": 71,
+          "body": "The new state-mapping and grouping behavior has no automated coverage, although comparable player-provider behavior is tested under `tests/providers/airplay/test_player.py`; add unit tests for initial mapping, source transitions, timeout handling, and group membership changes."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/manifest.json",
+          "line": 11,
+          "body": "This placeholder is exposed as the provider's documentation link and produces a broken target; use a real documentation URL or an empty string until one exists."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/features/playback/models.py",
+          "line": 13,
+          "body": "This enum omits valid pywam sources such as Coaxial, HDMI/HDMI 1/HDMI 2, and USB, so those values are silently removed from `source_list` and rejected by `select_source`; add every source supported by the pinned library and corresponding `PlayerSource` mappings."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/features/state_sync/mapper.py",
+          "line": 32,
+          "body": "AUX and Optical are marked passive even though this provider and pywam can select them, so clients will not offer these inputs for selection; mark selectable hardware inputs as non-passive."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/features/discovery/handler.py",
+          "line": 167,
+          "body": "Unexpected exceptions are swallowed forever by this long-running task, hiding programming errors behind repeated warnings; only handle cancellation here and let other failures surface through the tracked task callback, per the repository's no-broad-exception standard."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/player.py",
+          "line": 220,
+          "body": "The timeout is swallowed here, so `select_source` reports success and `play_media` continues even when the speaker never changes source; let `TimeoutError` propagate so `retry_command` can retry and ultimately fail the command."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/features/state_sync/handler.py",
+          "line": 57,
+          "body": "The initial snapshot is never mapped onto the player, and the library update occurred before this subscriber was registered, so a newly registered player can lack its name, volume, source, playback, and grouping state until a later event; apply the current state immediately after subscribing."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/features/state_sync/mapper.py",
+          "line": 116,
+          "body": "`group_children` is a set, so this publishes group members in nondeterministic order; sort it before assigning the serialized player state, as required by the repository's deterministic-ordering standard."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/features/state_sync/handler.py",
+          "line": 202,
+          "body": "As in initial setup, `connect()` is outside the cleanup block, so failure after opening the socket but before listener startup can leak the replacement client; include connection establishment in the `try` that disconnects on failure."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 1,
+    "config": "c4",
+    "pr": 27,
+    "repo": "music-assistant/server",
+    "src_pr": 3067,
+    "author": "MarvinSchenkel",
+    "ground_truth": "This could be verbose to avoid clogging the logs too much",
+    "path": "music_assistant/providers/wiim/player.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nReproduces #3067 by adding a pywiim-based WiiM/LinkPlay player provider.\n\n**Changes:**\n- Adds device discovery, playback, grouping, eventing, and polling.\n- Registers provider metadata, configuration, icon, and dependencies.\n- Adds unrelated repository review standards.\n\n### Reviewed changes\n\nCopilot reviewed 6 out of 7 changed files in this pull request and generated 5 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `requirements_all.txt` | Adds pywiim dependency. |\r\n| `music_assistant/providers/wiim/__init__.py` | Registers and configures the provider. |\r\n| `music_assistant/providers/wiim/provider.py` | Implements discovery and lifecycle handling. |\r\n| `music_assistant/providers/wiim/player.py` | Implements player controls and state synchronization. |\r\n| `music_assistant/providers/wiim/manifest.json` | Defines provider metadata and dependencies. |\r\n| `music_assistant/providers/wiim/icon.svg` | Adds the provider icon. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds repository review guidance. |\n</details>\n\n\n\n\n\n<details>\n<summary>Suppressed comments (2)</summary>\n\n**music_assistant/providers/wiim/player.py:303**\n* `set_current_media` preserves existing fields when new values are empty unless `clear_all=True`. Consequently, switching to a track/source without album, artist, or artwork leaves metadata from the previous item visible. Reset the media object before applying this snapshot.\n```\n                self.set_current_media(\n```\n**music_assistant/providers/wiim/player.py:234**\n* If either unsubscribe or the UPnP close fails, the later client cleanup is skipped, leaking remaining connections during provider reload/shutdown. Put each teardown stage in `finally` so all resources are attempted, as required by the teardown precedent in [server#4879](https://github.com/music-assistant/server/pull/4879#discussion_r3622539210).\n```\n        await super().on_unload()\n        await self.wiim_eventer.async_unsubscribe()\n        await self.wiim_upnp_client.close()\n        await self.wiim_client.close()\n```\n</details>\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-1-c4-base?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 6,
+          "body": "This repository-wide review-policy file is unrelated to adding WiiM/LinkPlay support, so it makes the PR multi-purpose. The project's single-purpose PR standard ([server#2911](https://github.com/music-assistant/server/pull/2911#discussion_r2751214136)) requires removing this file and submitting the policy change separately."
+        },
+        {
+          "path": "music_assistant/providers/wiim/player.py",
+          "line": 169,
+          "body": "The five-second interval applies even while the device is idle, despite the real-time UPnP subscription. Since the player controller polls providers sequentially, every idle WiiM performs 12 refreshes per minute and multiple devices can delay the whole polling loop. Make the fallback polling adaptive, keeping the short interval only during playback, in line with the event-driven precedent in [server#2810](https://github.com/music-assistant/server/pull/2810#discussion_r2620775575)."
+        },
+        {
+          "path": "music_assistant/providers/wiim/player.py",
+          "line": 281,
+          "body": "The pinned pywiim API can return the normalized state `buffering`, but MA's `PlaybackState` has no corresponding enum value (other integrations map buffering to `PLAYING`). Direct construction therefore raises `ValueError` and aborts state updates whenever the device buffers. Map that state explicitly.\n\nThis issue also appears on line 303 of the same file."
+        },
+        {
+          "path": "music_assistant/providers/wiim/player.py",
+          "line": 153,
+          "body": "These cleanup handlers do not run when setup is cancelled because `asyncio.CancelledError` is a `BaseException`. Cancellation after the event subscription starts can therefore leave the eventer and both clients open. Structure setup with `try/finally` (or an async exit stack whose cleanup is transferred after registration) so cancellation also tears down partially initialized resources; this follows the teardown requirement established in [server#4879](https://github.com/music-assistant/server/pull/4879#discussion_r3622539210).\n\nThis issue also appears on line 231 of the same file."
+        },
+        {
+          "path": "music_assistant/providers/wiim/player.py",
+          "line": 269,
+          "body": "No tests accompany this new state-translation path. Add focused unit coverage for all pywiim normalized states (especially `buffering`), master/slave group snapshots, and metadata clearing; comparable player-provider logic already has tests in `tests/providers/airplay/test_player.py`."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 2,
+    "config": "c4",
+    "pr": 28,
+    "repo": "music-assistant/server",
+    "src_pr": 3776,
+    "author": "MarvinSchenkel",
+    "ground_truth": "Both MIN and MAX output buffer duration seem unused now after we dropped the config. We can remove the constants",
+    "path": "music_assistant/providers/airplay/constants.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nReproduces AirPlay 2 synchronization changes from server#3776 for benchmarking.\n\n**Changes:**\n- Adds configurable session-establishment latency and timing diagnostics.\n- Updates CLI synchronization arguments and stderr parsing.\n- Adds repository review guidance.\n\n### Reviewed changes\n\nCopilot reviewed 5 out of 9 changed files in this pull request and generated 4 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds review standards. |\r\n| `music_assistant/providers/airplay/constants.py` | Defines session timing constants. |\r\n| `music_assistant/providers/airplay/player.py` | Adds latency configuration and synchronization messaging. |\r\n| `music_assistant/providers/airplay/protocols/_protocol.py` | Tracks connection timestamps. |\r\n| `music_assistant/providers/airplay/protocols/airplay2.py` | Measures sessions and updates CLI event handling. |\n</details>\n\n\n\n\n\n<details>\n<summary>Suppressed comments (1)</summary>\n\n**music_assistant/providers/airplay/protocols/airplay2.py:120**\n* [PROBLEM] This eagerly formatted warning also violates the positional logging rule in `.github/instructions/music-assistant-standards.instructions.md:32`; defer interpolation to the logger.\n```\n            self.logger.warning(\n                f\"Configured value of {self.player.session_establishment_latency_ms}ms for session establishment latency \"\n                f\"is outside the recommended range for player {self.player.name}. The recommended range is between \"\n                f\"{low} and {high} ms. Please adjust this advanced configuration value accordingly.\"\n```\n</details>\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-2-c4-base?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": "music_assistant/providers/airplay/protocols/airplay2.py",
+          "line": 109,
+          "body": "[PROBLEM] This eagerly formatted log message violates the positional logging rule in `.github/instructions/music-assistant-standards.instructions.md:32`; pass values as logger arguments instead.\n\nThis issue also appears on line 117 of the same file."
+        },
+        {
+          "path": "music_assistant/providers/airplay/protocols/airplay2.py",
+          "line": 70,
+          "body": "[PROBLEM] The documented 700 ms lower boundary does not explain why this calculation recommends only 600 ms less, so add the intended safety-margin rationale to keep the tuning guidance internally consistent."
+        },
+        {
+          "path": "music_assistant/providers/airplay/constants.py",
+          "line": 44,
+          "body": "[PROBLEM] These output-buffer bounds are now unused because `output_buffer_duration_ms` is fixed, so remove both constants rather than leaving a dead configurable-range contract."
+        },
+        {
+          "path": "music_assistant/providers/airplay/player.py",
+          "line": 346,
+          "body": "[CRITICAL] AirPlay 2 players still cannot be synchronized because `supported_features` removes `SET_MEMBERS` and `can_group_with` returns an empty set at lines 151\u2013172, so either restore AP2 grouping capability or keep this alert stating that synchronization is unavailable."
+        }
+      ]
+    }
+  }
+]

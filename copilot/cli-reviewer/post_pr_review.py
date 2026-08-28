@@ -42,25 +42,22 @@ def gh(args, inp=None):
 
 
 def extract_findings(raw):
-    """Return the first balanced ``[...]`` in the output that parses to a JSON list."""
-    depth = 0
-    start = -1
+    """
+    Return the first ``[...]`` in the output that parses as a JSON list of findings.
+
+    Uses ``raw_decode`` (which honours JSON string quoting) rather than counting brackets,
+    so ``[``/``]`` inside a finding's text can't break detection. Trailing prose is ignored.
+    """
+    decoder = json.JSONDecoder()
     for i, char in enumerate(raw):
-        if char == "[":
-            if depth == 0:
-                start = i
-            depth += 1
-        elif char == "]" and depth > 0:
-            depth -= 1
-            if depth == 0 and start != -1:
-                try:
-                    data = json.loads(raw[start : i + 1])
-                except json.JSONDecodeError:
-                    start = -1
-                    continue
-                if isinstance(data, list):
-                    return data
-                start = -1
+        if char != "[":
+            continue
+        try:
+            data = decoder.raw_decode(raw[i:])[0]
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, list) and (not data or isinstance(data[0], dict)):
+            return data
     return []
 
 
@@ -106,16 +103,37 @@ def main():
         body = f"**[{finding.get('severity', 'SUGGESTION')}]** {finding.get('issue', '')}"
         if finding.get("citation_url"):
             body += f"\n\n_Standard: {finding.get('principle', '')} — {finding['citation_url']}_"
-        if finding.get("path") and isinstance(finding.get("line"), int):
+        anchored = bool(finding.get("path")) and isinstance(finding.get("line"), int)
+        suggestion = finding.get("suggestion")
+        if anchored and isinstance(suggestion, str) and suggestion.strip():
+            # A fenced ```suggestion block is a one-click change a maintainer can apply, replacing
+            # the anchored line; the model fills it for confident, self-contained in-diff fixes.
+            block = suggestion.rstrip("\n")
+            body += f"\n\n```suggestion\n{block}\n```"
+        scaffold = finding.get("scaffold")
+        scaffold_md = ""
+        if isinstance(scaffold, str) and scaffold.strip():
+            # A starter test can't be a one-click suggestion (its target file isn't in the diff),
+            # so offer it as a copy-paste block the author adapts and verifies.
+            fence = f"```python\n{scaffold.strip()}\n```"
+            summary = "Starter test — copy into tests/ and adapt"
+            scaffold_md = f"\n\n<details><summary>{summary}</summary>\n\n{fence}\n\n</details>"
+        if anchored:
             comments.append(
-                {"path": finding["path"], "line": finding["line"], "side": "RIGHT", "body": body},
+                {
+                    "path": finding["path"],
+                    "line": finding["line"],
+                    "side": "RIGHT",
+                    "body": body + scaffold_md,
+                },
             )
         else:
-            overflow.append(summary_line(finding))
+            overflow.append(summary_line(finding) + scaffold_md)
 
-    review_body = "\n".join(
-        intro + (["### Notes (not anchored to diff lines)", *overflow] if overflow else []),
-    )
+    parts = list(intro)
+    if overflow:
+        parts += ["### Notes (not anchored to diff lines)", "", "\n\n".join(overflow)]
+    review_body = "\n".join(parts)
     summary_only = "\n".join(intro + [summary_line(f) for f in findings])
 
     payload = {"body": review_body, "event": "COMMENT"}

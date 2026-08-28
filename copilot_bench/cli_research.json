@@ -1,0 +1,243 @@
+{
+  "summary": "Determine whether the native review architecture (agentic + local corpus grep + Opus 5) can run headless in CI on the Copilot CLI / coding agent, on a sponsored (free) Copilot org",
+  "agentCount": 3,
+  "logs": [],
+  "result": {
+    "research": [
+      {
+        "topic": "Copilot CLI headless review",
+        "summary": "GitHub Copilot CLI (`copilot`) can run the entire \"Sage\" reviewer architecture headlessly in a GitHub Action: it has a real non-interactive one-shot mode (`copilot -p \"<prompt>\" -s`), built-in shell/read/write/url tools (so it can grep a local ~6MB corpus with NO hosted MCP server), first-class custom agents via `.agent.md` (with their own model + tools + MCP servers + instructions), explicit model selection (`--model`), and token-based auth for CI (`COPILOT_GITHUB_TOKEN`/`GH_TOKEN`/`GITHUB_TOKEN`). Output goes to stdout, which you capture and post to the PR yourself via `gh api` (the CLI does not post reviews on its own). The ONE hard caveat is billing: selecting a Claude model (Opus/Sonnet) is a premium (non-\"included\") model, so every CLI prompt consumes premium requests at that model's multiplier. Whether a GitHub-\"sponsored\"/free org actually gets that agentic Opus usage for free — versus being capped at ~50 premium requests/month (Copilot Free) or metered overage — is the thing I could NOT confirm from a primary source and is the real risk to the plan. Note also: the latest Anthropic model in Copilot CLI as of July 2026 is Claude Opus 4.8, not \"Opus 5\" — verify the exact model id before wiring it in.",
+        "can_run_native_architecture": "Yes. The full architecture is supported natively. (1) Headless: `copilot -p \"<prompt>\" -s` runs one prompt and exits, designed for scripts/CI. (2) Grep a local corpus: the built-in `shell` and `read` tools let it run grep/cat against a local file — no MCP server needed; grant `--allow-tool='shell(grep:*), read'`. (3) Model choice: `--model` or per-agent `model:` field selects a Claude model. (4) Custom \"Sage\" agent: a `.agent.md` file carries its own model, tools, MCP servers, and up-to-30k-char instructions. Docs: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference . Only caveat is billing (see below), not capability.",
+        "headless_ci": "Yes — non-interactive by design. Flag: `-p`/`--prompt` \"Execute a prompt in non-interactive mode. The CLI runs the prompt and exits when done.\" Add `-s` to suppress formatting/stats and emit only the agent's response for clean piping. Auth in an Action is via env var, precedence `COPILOT_GITHUB_TOKEN` > `GH_TOKEN` > `GITHUB_TOKEN`; official Actions example sets `COPILOT_GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}`. Important: it authenticates a Copilot SEAT/token, not the ephemeral Actions `GITHUB_TOKEN` for Copilot entitlement — the token must belong to an identity that has a Copilot license, so use a PAT (or org token) for a licensed account, not the default workflow token. Use `--allow-tool`/`--allow-all-tools` plus `--no-ask-user` so it never blocks on a prompt in CI. Sources: https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically ; https://github.blog/ai-and-ml/github-copilot/github-copilot-cli-for-beginners-interactive-v-non-interactive-mode/",
+        "local_file_tools": "Yes — built in, no hosted MCP required. Built-in tool kinds are `shell` (execute shell commands), `read` (read files/directories), `write` (create/modify files), and `url` (fetch a URL). Tools take filters, e.g. `shell(git:*)`, `write(README.md)`. So `--allow-tool='shell(grep:*), read'` lets the agent grep/read your local ~6MB corpus file directly. MCP is also supported (tool kind `MCP-SERVER`, and custom agents can declare `mcp-servers`) but is optional for local file/grep work. Source: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference",
+        "model_selection": "Yes. Select with `--model` (e.g. `--model=claude-sonnet-4.6`), or set `COPILOT_MODEL`, or set `model:` in the custom agent's `.agent.md` frontmatter. Precedence: custom-agent model > `--model` > `COPILOT_MODEL` > `~/.copilot/settings.json` > CLI default. Anthropic models available in Copilot CLI as of July 2026 are Claude Opus 4.8, Sonnet 4.6, Haiku 4.5. CAVEAT: the task says \"Opus 5\" — I found no evidence of an \"Opus 5\" in Copilot; the current flagship is Opus 4.8. Verify the exact model id (`copilot` `/model` list or `--model` docs) before hardcoding. Sources: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference ; https://github.blog/changelog/2026-01-14-github-copilot-cli-enhanced-agents-context-management-and-new-ways-to-install/",
+        "output_and_posting": "The CLI prints the review to stdout only — it does NOT post to the PR itself. Pattern: `review=$(copilot -p \"<sage prompt>\" -s --allow-tool='shell(grep:*), read' --no-ask-user)` then post it yourself with `gh api` / `gh pr review` (e.g. `gh pr comment` or `POST /repos/{owner}/{repo}/pulls/{n}/reviews` for inline comments). If you want structured/inline comments, have the Sage agent emit JSON and translate it to the reviews API payload in the workflow. Note: this is distinct from GitHub's built-in \"Copilot code review\" feature (which posts directly and is billed separately at a fixed multiplier). Source: https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically",
+        "billing_for_sponsored": "UNCONFIRMED — this is the weak point. Copilot's \"included\" models (GPT-5 mini / GPT-4.1 / GPT-4o) consume zero premium requests, but Claude Opus/Sonnet are premium models, so a Claude-powered CLI review consumes premium requests at that model's multiplier every run (Opus historically ~10x). \"Each prompt to Copilot CLI uses one premium request with the default model.\" A GitHub-sponsored/OSS or nonprofit \"free\" seat is typically Copilot Free-tier, which caps at ~50 premium requests/month — meaning an Opus PR-review agent could exhaust the month's quota in a handful of PRs, then fall back to included models or stop. I could not find a primary source stating that sponsored/free orgs get uncapped or unmetered agentic Opus usage. Community threads on CLI premium consumption are contradictory and contain NO official answer. Treat \"free Opus review\" as unverified: confirm the specific plan's premium-request allowance and overage policy before relying on it. Sources: https://docs.github.com/copilot/concepts/copilot-billing/understanding-and-managing-requests-in-copilot ; https://github.com/orgs/community/discussions/194343",
+        "confidence": "high",
+        "limits": [
+          "Claude models are premium (non-included): every CLI review prompt burns premium requests at the model's multiplier; only GPT-5 mini/4.1/4o are free of premium metering.",
+          "Copilot Free tier (typical for sponsored/OSS/nonprofit) is capped ~50 premium requests/month — likely too few for an Opus-per-PR reviewer.",
+          "CI auth needs a token tied to a Copilot-LICENSED identity (PAT/seat token), not the default Actions GITHUB_TOKEN's Copilot entitlement.",
+          "CLI does not post to the PR — you must capture stdout and post via gh api/gh pr review yourself.",
+          "Custom agent instruction files are capped at 30,000 characters (fine for the agent prompt, but the 6MB corpus must be grep'd via shell/read at runtime, not embedded).",
+          "'Opus 5' appears not to exist in Copilot as of July 2026 — latest is Opus 4.8; the exact --model id must be verified.",
+          "Community reports on whether default-model CLI use meters premium requests are contradictory with no official resolution."
+        ],
+        "uncertainties": [
+          "Whether a GitHub-'sponsored'/free Copilot org gets Claude Opus agentic CLI usage genuinely free (unmetered/no overage) vs. capped premium requests — no primary source found; likely capped.",
+          "Exact premium-request multiplier for the current Claude Opus (4.8) in Copilot CLI — the billing doc I read did not list per-model Opus values.",
+          "Existence/id of 'Claude Opus 5' in Copilot CLI — only Opus 4.8 confirmed as of July 2026.",
+          "Whether default-model CLI prompts consume premium requests on seat-based (Business/Enterprise) plans — official docs say 'one premium request' per CLI prompt, but a community thread reports 0 for included models; unresolved."
+        ],
+        "citations": [
+          {
+            "url": "https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference",
+            "key_claim": "`-p` runs a prompt non-interactively and exits; built-in tools are shell/read/write/url with filters like shell(git:*); `--model` selects the model; auth precedence COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN; MCP-SERVER tool kind and --agent supported."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically",
+            "key_claim": "Official Actions example: `copilot -p \"...\" -s --allow-tool='shell(npm:*), write' --no-ask-user` with `env: COPILOT_GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}`; capture with result=$(copilot -p '...' -s)."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/reference/custom-agents-configuration",
+            "key_claim": "Custom agents are `.agent.md` files with YAML frontmatter fields model, tools, mcp-servers plus up-to-30,000-char markdown instructions."
+          },
+          {
+            "url": "https://docs.github.com/copilot/concepts/copilot-billing/understanding-and-managing-requests-in-copilot",
+            "key_claim": "Each prompt to Copilot CLI uses one premium request with the default model; GPT-5 mini/4.1/4o are included and consume no premium requests."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-01-14-github-copilot-cli-enhanced-agents-context-management-and-new-ways-to-install/",
+            "key_claim": "Copilot CLI supports MCP servers and custom agents directly in Claude agent flows."
+          },
+          {
+            "url": "https://github.com/orgs/community/discussions/194343",
+            "key_claim": "Community thread on CLI premium-request consumption is contradictory with no official GitHub resolution."
+          }
+        ]
+      },
+      {
+        "topic": "Copilot coding agent reviewer + sponsored billing",
+        "summary": "Yes to the reviewer architecture. GitHub Copilot code review (and a custom .github/agents/*.agent.md agent) can be steered by repo instruction files + agent skills + read-only MCP servers to assess a PR against your principles and a corpus, and it posts findings as an inline PR review — but always as a non-blocking \"Comment\" review (never Approve/Request changes), typically finishing in under 30 seconds. Claude Opus 5 is a selectable model in Copilot as of July 2026 (Pro+/Business/Enterprise), and custom agents support a `model` property; MCP tool calls during review are limited to read-only, which fits corpus retrieval. On billing, the important correction: as of June 1, 2026 GitHub Copilot moved to usage-based \"AI Credits\" (1 credit = $0.01), where chat, agent mode, coding agent, and code review all draw credits metered by token usage x per-model rate, with an included allowance matching the plan price and overage billed at published rates unless capped by a budget. GitHub for Nonprofits does NOT bundle free/discounted Copilot — Copilot is licensed separately at standard pricing — and I found no primary source describing any sponsored/donated-Copilot arrangement that grants UNLIMITED premium/agentic usage. So even for a sponsored org, premium-model (Opus 5) agentic usage remains metered against the credit allowance with overage; sponsorship (where it exists) covers the seat cost, not uncapped premium usage. Separately, both the coding agent (runs on Actions runners) and code review (on private repos, starting June 1, 2026) also consume GitHub Actions minutes from your plan allowance, with overage at standard Actions rates — regardless of sponsorship.",
+        "can_run_native_architecture": "Partially — see field above; corpus grep must be via a read-only MCP tool, not raw local file/shell access, and output is a non-blocking Comment review.",
+        "headless_ci": "See headless_ci above.",
+        "confidence": "medium",
+        "billing_for_sponsored": "Still metered. As of June 1, 2026 all Copilot plans use usage-based AI Credits (1 credit = $0.01); code review, agent mode, and the coding agent consume credits metered by token usage x per-model rate (premium models like Opus 5 cost more per token). Each plan includes a credit allowance matching its price (e.g. Business ~1,900/user, Enterprise ~3,900/user) and overage is billed at published rates unless an admin sets a spend cap/budget. GitHub for Nonprofits gives a free Team plan or 25% off Enterprise Cloud but does NOT include free/discounted Copilot — \"GitHub does not currently offer Copilot free or at a discounted rate to non-profits\"; Copilot is licensed separately at standard pricing. I found no primary source for any sponsored/donated Copilot that grants UNLIMITED premium/agentic usage — sponsorship (where an org negotiates it) covers seat cost, and premium/agentic usage still draws from the metered credit allowance with overage. So: not genuinely free-with-no-overage for heavy Opus 5 agentic review; still capped/metered.",
+        "model_selection": "Yes. Claude Opus 5 became a selectable Copilot model in July 2026 (rolled out first to Pro+, Business, Enterprise; gradual). Model selection for Claude/Codex agents on github.com has been available since April 2026. Custom agents (.agent.md) support a `model` property to pin the model. Uncertainty: the docs are clearest about model choice for chat/agents; I could not fully confirm from a primary source that the code-review reviewer bot itself exposes an explicit Opus-5 picker (vs. inheriting a default/org-configured model) — treat \"code review specifically runs on Opus 5 of your choosing\" as not fully verified.",
+        "local_file_tools": "No built-in arbitrary local file/shell tool for the cloud code-review reviewer. It cannot be pointed at a raw ~6MB corpus file to grep directly. To give it the corpus you expose it through a read-only MCP server (all Copilot code review MCP tool calls are read-only), or encode standards into agent skills (.github/skills/SKILL.md) and instruction files. The coding agent (code-authoring) does run in an Actions container with repo checkout, so it can read files in the repo, but that's the author-code path, not the reviewer.",
+        "output_and_posting": "Produces a structured PR review posted directly to the PR: inline comments on specific lines, prose findings, and directly-applicable suggested code changes. Important constraint: it \"always leaves a 'Comment' review, not an 'Approve' or 'Request changes' review\" — so it informs but cannot block merge on its own (you'd pair it with branch protection / a separate required check if you want a gate). Custom agents can likewise post analysis/review comments.",
+        "citations": [
+          {
+            "url": "https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/copilot-code-review",
+            "key_claim": "Copilot code review is requested via the Reviewers sidebar or REST API (copilot-pull-request-reviewer[bot]), always leaves a 'Comment' review (not Approve/Request changes), typically completes in under 30s with suggested changes, and can use agent skills and MCP servers configured in the repository when relevant."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-07-29-copilot-code-review-agent-skills-and-mcp-now-generally-available/",
+            "key_claim": "Agent skills (.github/skills/SKILL.md) and MCP servers are GA for Copilot code review (Pro, Pro+, Business, Enterprise); MCP servers pull third-party context but 'All MCP tool calls performed by Copilot code review will be limited to read-only.'"
+          },
+          {
+            "url": "https://github.blog/changelog/2026-07-17-copilot-code-review-customization-and-configurability-improvements/",
+            "key_claim": "Code review reads repository custom instructions, agent instructions, and agent skills from the head branch, and reads REVIEW.md, GEMINI.md, and CLAUDE.md files."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-06-18-copilot-code-review-agents-md-support-and-ui-improvements/",
+            "key_claim": "Copilot code review uses a repository's AGENTS.md to shape review feedback automatically."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/create-custom-agents",
+            "key_claim": "Custom agents (.github/agents/*.agent.md) can perform review/analysis tasks, restrict or grant tools, attach agent-scoped MCP servers, and set a `model` property; if tools is omitted the agent has access to all available tools."
+          },
+          {
+            "url": "https://github.blog/news-insights/company-news/github-copilot-is-moving-to-usage-based-billing/",
+            "key_claim": "From June 1, 2026 Copilot uses AI Credits consumed by token usage per published per-model API rates; code completions/Next Edit are free; chat, agent, coding agent, and code review consume credits; orgs choose to allow overage at published rates or cap spend."
+          },
+          {
+            "url": "https://docs.github.com/en/copilot/concepts/billing/usage-based-billing-for-organizations-and-enterprises",
+            "key_claim": "Business includes ~1,900 AI credits/user and Enterprise ~3,900/user (1 credit = $0.01); usage converts token cost per model into credits; admins set budgets to control metered spend."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-04-27-github-copilot-code-review-will-start-consuming-github-actions-minutes-on-june-1-2026/",
+            "key_claim": "From June 1, 2026 code review consumes GitHub Actions minutes from your plan entitlement on private repos, with usage beyond included minutes billed at standard Actions rates."
+          },
+          {
+            "url": "https://github.blog/changelog/2025-07-10-github-copilot-coding-agent-now-uses-one-premium-request-per-session/",
+            "key_claim": "The coding agent runs on GitHub-hosted Actions runners so every session also consumes GitHub Actions minutes from the account's monthly allowance, in addition to its request/credit charge."
+          },
+          {
+            "url": "https://github.blog/changelog/2026-04-14-model-selection-for-claude-and-codex-agents-on-github-com/",
+            "key_claim": "Model selection for Claude and Codex agents on github.com is available (April 2026), letting you choose the model an agent uses."
+          },
+          {
+            "url": "https://docs.github.com/en/nonprofit/nonprofit-enterprise-plan",
+            "key_claim": "GitHub for Nonprofits provides a free Team plan or 25% off Enterprise Cloud; the program applies to the GitHub platform, and Copilot is not offered free/discounted to nonprofits under it."
+          }
+        ],
+        "limits": [
+          "Code review output is always a non-blocking 'Comment' review — it cannot Approve or Request changes, so it informs but does not gate a merge by itself.",
+          "All MCP tool calls during Copilot code review are read-only — good for corpus retrieval, but the reviewer cannot write files or call side-effecting tools.",
+          "No raw local file/shell tool for the cloud reviewer: a ~6MB corpus must be exposed via a read-only MCP server or baked into SKILL.md / instruction files, not grepped from disk like a terminal CLI agent.",
+          "Instruction files should be kept short (best practice ~1,000 lines max per file) or Copilot may not fully process them.",
+          "Both code review (private repos, from June 1 2026) and the coding agent (Actions runners) consume GitHub Actions minutes with overage at standard rates — a second meter beyond AI Credits.",
+          "Usage-based AI Credits (from June 1 2026) meter premium-model usage by token x per-model rate; heavy Opus 5 agentic review can exceed the plan's included allowance and incur overage unless a spend cap/budget is set.",
+          "GitHub for Nonprofits does not include free/discounted Copilot; Copilot is licensed separately at standard pricing."
+        ],
+        "uncertainties": [
+          "Could not confirm from a primary source that the code-review reviewer bot specifically exposes an explicit Claude Opus 5 model picker (vs inheriting an org default). Model selection is clearly documented for chat and for Claude/Codex agents; 'code review runs on the Opus 5 you pick' is inferred, not verified.",
+          "Found no primary source describing any sponsored/donated Copilot arrangement (e.g. via Microsoft Tech for Social Impact or a negotiated enterprise agreement) that grants UNLIMITED premium/agentic usage with no overage. The Microsoft nonprofit blog body was not retrievable. Absent evidence, the safe conclusion is that usage remains metered even when seats are sponsored — but a specific negotiated grant could differ and should be confirmed with GitHub/Microsoft directly.",
+          "Exact per-model token rate/credit multiplier for Claude Opus 5 in Copilot was not pinned to a primary rate table in these sources.",
+          "Some plan credit-allowance figures (e.g. promotional June-Aug boosts) came from secondary sources and may be stale or promotional."
+        ]
+      }
+    ],
+    "synth": {
+      "direct_answer": "Partial — yes on capability, \"it depends\" on the \"free\" part. There IS a supported (non-ToS-violating) path: GitHub Copilot CLI run headlessly inside a GitHub Action. It genuinely reproduces the native ARCHITECTURE — a full-attention agent that can grep your local ~6MB / 10.5k-comment corpus using its BUILT-IN shell/read tools (NO hosted MCP server required — this is the key win), driven by a custom `.agent.md` \"Sage\" agent with its own model + instructions, selecting a Claude model. So capability = yes. The catches are three: (1) BILLING is the weak point and undercuts \"free to them\" for exactly the config you want. As of June 1, 2026 Copilot is usage-based AI Credits; Claude/Opus is a PREMIUM model metered by token-usage × per-model rate. A Microsoft-SPONSORED Enterprise seat means the SEAT is paid for you — it does NOT mean unlimited premium/agentic credits. An Opus agent that greps a corpus per PR burns credits fast against the included allowance (~3,900 credits/user/mo on Enterprise) and then hits overage-or-cap. No primary source found says sponsored orgs get uncapped premium agentic usage. So it's free only up to the credit allowance, not free-per-review. (2) AUTH/POSTING: the CLI must authenticate a Copilot-LICENSED identity (a PAT/seat token as COPILOT_GITHUB_TOKEN), not the default Actions GITHUB_TOKEN, and it prints the review to stdout only — YOU capture it and post via `gh api`/`gh pr review`. (3) \"Opus 5\" is unconfirmed in Copilot CLI as of the research (Opus 4.8 confirmed; one finding claims Opus 5 rolled out July 2026 to Enterprise — conflicting, must verify the exact `--model` id). Note: the proven 3/6 baseline itself ran on Opus 4.8, so 4.8-in-Copilot could be a 1:1 model match even if Opus 5 isn't available.",
+      "best_path": {
+        "name": "GitHub Copilot CLI (`copilot -p ... -s`) as a custom Sage agent, run headlessly in a GitHub Action",
+        "how_it_works": "A workflow triggers on pull_request. Steps: (1) checkout the repo AND the corpus file (commit the ~6MB corpus into the repo or fetch it in a step). (2) Install Copilot CLI. (3) Provide a `.github/agents/sage.agent.md` (or `.agent.md`) whose YAML frontmatter pins model (a Claude model id you verify), tools, and carries the ohf-sage reviewer instructions (≤30k chars — fine; the corpus is grep'd at runtime, NOT embedded). (4) Run non-interactively: `review=$(copilot -p \"<sage review prompt: diff + instruction to grep the corpus for precedent>\" -s --allow-tool='shell(grep:*), read' --no-ask-user --model=<verified-claude-id>)`. The built-in `shell`+`read` tools let the agent grep/cat the local corpus directly — no MCP server to host or maintain. (5) Post the captured stdout to the PR yourself: `gh pr review` / `gh pr comment`, or have the agent emit JSON and translate to the REST reviews API for inline comments. Auth: set `COPILOT_GITHUB_TOKEN: ${{ secrets.PAT }}` where the PAT belongs to a Copilot-licensed account (the sponsored seat), NOT the ephemeral workflow token.",
+        "fidelity_vs_native": "Can be architecturally 1:1 with the proven baseline (full-attention agent + live corpus grep + Claude model + cited output) — this is the same shape that scored 3/6, not the fixed-engine review BOT capped at ~1/6. Two fidelity risks to test, not assume: (a) MODEL — proven baseline was Opus 4.8; if Copilot only serves Opus 4.8 (not 5) that is actually a match; if you need Opus 5, confirm its `--model` id exists in Copilot CLI. (b) HARNESS — Copilot's agent/tool-calling loop and context window may differ from claude-code-action's, so recall parity (does it still hit 3/6?) must be measured empirically, not inferred.",
+        "marginal_cost_for_sponsored_org": "NOT reliably zero for this config. Sponsorship covers the SEAT, not premium credits. Each Opus CLI review consumes AI Credits metered by token usage × Opus per-model rate; a corpus-grepping agentic review is token-heavy, so a handful of PRs can eat a meaningful share of the ~3,900 credits/user/mo Enterprise allowance, after which it's overage (billed) or a hard cap (stops), depending on the org's budget setting. PLUS a second meter: the Action runs on GitHub Actions runners and consumes Actions minutes (code review on private repos also consumes Actions minutes as of June 1 2026). Free-of-marginal-cost is only true while inside the included credit + Actions-minute allowances.",
+        "what_to_verify_or_test": "1) Run `copilot` `/model` (or check `--model` docs) to confirm the EXACT Claude model id available on this org (Opus 4.8 vs 5). 2) Do ONE real PR run, then read the org's Copilot billing/credit dashboard to measure credits consumed per review and per-corpus-grep — extrapolate to monthly PR volume. 3) Confirm on THIS sponsored Enterprise plan whether a Claude-model CLI prompt meters premium credits and whether the sponsorship arrangement allows overage or caps spend (org budget setting). 4) Verify a Copilot-licensed PAT works as COPILOT_GITHUB_TOKEN in Actions (default GITHUB_TOKEN will NOT carry Copilot entitlement). 5) Confirm the agent can grep the full ~6MB corpus within context/tool limits and still emit cited findings. 6) Measure recall parity against the 3/6 baseline on the same test PRs before trusting it. 7) Confirm the stdout→`gh api` posting step produces the inline/cited review you want."
+      },
+      "alternatives": [
+        {
+          "name": "Copilot code review bot + agent skills (.github/skills/SKILL.md) + read-only MCP for corpus",
+          "tradeoff": "Supported and posts directly to the PR as inline comments, and IS steerable by CLAUDE.md/AGENTS.md/skills + a read-only MCP corpus server. But it runs on Copilot's FIXED review engine — the proven ceiling is ~1/6 recall regardless of model — and cannot grep a raw local corpus (needs a hosted read-only MCP server or baked-into-SKILL.md standards), and only ever leaves a non-blocking 'Comment' review. Lower fidelity than the CLI agent; rejected as the primary because the baseline already showed this surface underperforms."
+        },
+        {
+          "name": "Copilot cloud coding agent as a custom .agent.md reviewer",
+          "tradeoff": "Runs in an Actions container with repo checkout (so it CAN read committed corpus files) and supports a `model` property and agent-scoped MCP. But it's the code-AUTHORING path repurposed for review, adds session premium-request + Actions-minute cost, and posts as comments; more moving parts and meter surface than the CLI-in-Action path for the same architectural result."
+        },
+        {
+          "name": "Keep the proven native stack (claude-code-action on the Anthropic API, Opus 4.8)",
+          "tradeoff": "This is the PROVEN 3/6 baseline with known fidelity and no Copilot-harness uncertainty — but it spends Anthropic API tokens, which are explicitly NOT free to this org. It defeats the entire cost premise. Only worth keeping if the Copilot credit burn (measured in the pilot) turns out worse than paying Anthropic directly."
+        }
+      ],
+      "recommendation": "Pilot the Copilot CLI-in-Action path — it's the only supported surface that reproduces the full native architecture (agentic + live corpus grep with NO hosted MCP + Claude model + cited output), which is what separates the 3/6 baseline from the ~1/6 bot. Treat capability as PROVEN-on-paper but recall-parity and cost as MUST-TEST: wire up one workflow, run it on the same PRs used to establish the 3/6 baseline, and simultaneously read the credit meter. Decision gate: if (a) it hits ~3/6 recall AND (b) per-PR credit burn × your monthly PR volume stays inside the sponsored Enterprise credit + Actions-minute allowance (or under an acceptable capped budget), adopt it — you get native quality at near-zero marginal cost. If the Opus agentic corpus grep blows through credits into overage, the sponsorship does NOT rescue you (it covers seats, not premium usage), and you should either (1) cap the budget and accept fewer reviews/mo, (2) fall back to the read-only-MCP code-review-bot for cheap first-pass triage, or (3) reconsider paying Anthropic directly. Do NOT assume 'sponsored = free for Opus agents' — no primary source supports that, and the June 2026 usage-based billing model actively contradicts it.",
+      "open_questions_for_user": [
+        "What EXACT Claude model id does this org's Copilot CLI expose today — Opus 4.8 (matches your proven baseline) or a real 'Opus 5'? Please run `copilot` then `/model`, or `copilot --help` on model flags, and paste the list.",
+        "What is the org's included AI-credit allowance and does the Microsoft sponsorship set a spend cap or allow metered overage? (Check the org Copilot billing/budget settings.) This determines whether the plan is 'free until N reviews' or 'free but throttled'.",
+        "What is your monthly PR volume that would trigger a review? Needed to extrapolate whether per-PR credit burn stays inside the allowance.",
+        "Is the corpus already committable into the repo (or a sibling), or must it be fetched at workflow runtime? The CLI greps a LOCAL file, so it has to be on the runner's disk.",
+        "Do you have (or can you mint) a PAT tied to the sponsored Copilot-LICENSED seat for use as COPILOT_GITHUB_TOKEN? The default Actions GITHUB_TOKEN will not carry Copilot entitlement.",
+        "Do you need inline/line-anchored review comments (requires the agent to emit structured JSON → REST reviews API) or is a single prose PR comment acceptable?"
+      ]
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Research"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Synthesize"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "research:copilot-cli",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "aa5b510f283158789",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785452445223,
+      "queuedAt": 1785452443164,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Copilot CLI headless review",
+      "promptPreview": "You have web access but must load the tools first: call ToolSearch with query \"select:WebSearch,WebFetch\", then use them. Prefer OFFICIAL sources (docs.github.com, github.blog, the GitHub Copilot CLI docs/repo) and 2026 material — this changes monthly, flag anything older as possibly stale. Cite the source URL and quote the key sentence for every non-obvious claim. Flag anything you cannot confirm…",
+      "lastProgressAt": 1785452609571,
+      "tokens": 57622,
+      "toolCalls": 11,
+      "durationMs": 164348,
+      "resultPreview": "{\"topic\":\"Copilot CLI headless review\",\"summary\":\"GitHub Copilot CLI (`copilot`) can run the entire \\\"Sage\\\" reviewer architecture headlessly in a GitHub Action: it has a real non-interactive one-shot mode (`copilot -p \\\"<prompt>\\\" -s`), built-in shell/read/write/url tools (so it can grep a local ~6MB corpus with NO hosted MCP server), first-class custom agents via `.agent.md` (with their own mode…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "research:agent-sponsored",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a09c9527369cac7a8",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785452445635,
+      "queuedAt": 1785452443164,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Copilot coding agent reviewer + sponsored billing",
+      "promptPreview": "You have web access but must load the tools first: call ToolSearch with query \"select:WebSearch,WebFetch\", then use them. Prefer OFFICIAL sources (docs.github.com, github.blog, the GitHub Copilot CLI docs/repo) and 2026 material — this changes monthly, flag anything older as possibly stale. Cite the source URL and quote the key sentence for every non-obvious claim. Flag anything you cannot confirm…",
+      "lastProgressAt": 1785452629000,
+      "tokens": 60627,
+      "toolCalls": 16,
+      "durationMs": 183365,
+      "resultPreview": "{\"topic\":\"Copilot coding agent reviewer + sponsored billing\",\"summary\":\"Yes to the reviewer architecture. GitHub Copilot code review (and a custom .github/agents/*.agent.md agent) can be steered by repo instruction files + agent skills + read-only MCP servers to assess a PR against your principles and a corpus, and it posts findings as an inline PR review — but always as a non-blocking \\\"Comment\\\"…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "synthesize:cli-path",
+      "phaseIndex": 2,
+      "phaseTitle": "Synthesize",
+      "agentId": "a9f87e38c97ce69b1",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785452633010,
+      "queuedAt": 1785452631162,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Partial — yes on capability, \"it depends\" on the \"free\" par…",
+      "promptPreview": "You are answering whether a non-profit whose Copilot Enterprise is sponsored by Microsoft (so Copilot model usage is free to them, but Anthropic API tokens are NOT) can run a NATIVE-QUALITY PR review — full-attention agent + corpus retrieval + a strong model (Opus 5) — on Copilot's free-to-them models via a SUPPORTED path (not the ToS-violating reverse proxy).\n\nProven baseline: the native architec…",
+      "lastProgressAt": 1785452713200,
+      "tokens": 48440,
+      "toolCalls": 1,
+      "durationMs": 80190,
+      "resultPreview": "{\"direct_answer\":\"Partial — yes on capability, \\\"it depends\\\" on the \\\"free\\\" part. There IS a supported (non-ToS-violating) path: GitHub Copilot CLI run headlessly inside a GitHub Action. It genuinely reproduces the native ARCHITECTURE — a full-attention agent that can grep your local ~6MB / 10.5k-comment corpus using its BUILT-IN shell/read tools (NO hosted MCP server required — this is the key …"
+    }
+  ],
+  "totalTokens": 166689,
+  "totalToolCalls": 28
+}
