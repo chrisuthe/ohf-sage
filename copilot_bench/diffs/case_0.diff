@@ -1,0 +1,2020 @@
+diff --git a/music_assistant/providers/samsung_wam/__init__.py b/music_assistant/providers/samsung_wam/__init__.py
+new file mode 100644
+index 00000000000..fdca79921ae
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/__init__.py
+@@ -0,0 +1,82 @@
++"""Samsung Wireless Audio (WAM) Player provider for Music Assistant."""
++
++from __future__ import annotations
++
++import logging
++from typing import TYPE_CHECKING
++
++from music_assistant.constants import VERBOSE_LOG_LEVEL
++
++from .provider import SamsungWamProvider, get_config_entries
++
++
++class SpeakerStatusFilter(logging.Filter):
++    """Filter out spammy SpeakerStatus logs unless VERBOSE is enabled."""
++
++    def __init__(self, provider_logger: logging.Logger, name: str = "") -> None:
++        """Initialize the filter.
++
++        :param provider_logger: The logger instance attached to the provider.
++        :param name: Optional name for the filter.
++        """
++        super().__init__(name)
++        self.provider_logger = provider_logger
++
++    def filter(self, record: logging.LogRecord) -> bool:
++        """Filter SpeakerStatus logs if the provider is not in verbose mode."""
++        if self.provider_logger.isEnabledFor(VERBOSE_LOG_LEVEL):
++            return True
++        if record.msg == "Event: %s" and record.args and isinstance(record.args, tuple):
++            try:
++                event_obj = record.args[0]
++                if getattr(event_obj, "method", None) == "SpeakerStatus":
++                    return False
++            except (IndexError, AttributeError):
++                pass
++        return True
++
++
++if TYPE_CHECKING:
++    from music_assistant_models.config_entries import ProviderConfig
++    from music_assistant_models.provider import ProviderManifest
++
++    from music_assistant.mass import MusicAssistant
++    from music_assistant.models import ProviderInstanceType
++
++
++async def setup(
++    mass: MusicAssistant, manifest: ProviderManifest, config: ProviderConfig
++) -> ProviderInstanceType:
++    """Initialize the Samsung WAM provider instance with the given configuration.
++
++    :param mass: The MusicAssistant instance.
++    :param manifest: The provider manifest.
++    :param config: The user configuration for this provider.
++    :return: An initialized ProviderInstanceType.
++    """
++    prov = SamsungWamProvider(mass, manifest, config)
++
++    # Add a filter to suppress spammy SpeakerStatus logs from pywam.
++    pywam_events_logger = logging.getLogger("pywam.events")
++    if not any(isinstance(f, SpeakerStatusFilter) for f in pywam_events_logger.filters):
++        pywam_events_logger.addFilter(SpeakerStatusFilter(prov.logger))
++
++    # Configure dependency log levels to match the provider's configured verbosity.
++    if prov.logger.isEnabledFor(VERBOSE_LOG_LEVEL):
++        logging.getLogger("pywam").setLevel(logging.DEBUG)
++        logging.getLogger("async_upnp_client").setLevel(logging.DEBUG)
++    elif prov.logger.isEnabledFor(logging.DEBUG):
++        logging.getLogger("pywam").setLevel(logging.DEBUG)
++        logging.getLogger("pywam.client").setLevel(logging.INFO)
++        logging.getLogger("async_upnp_client").setLevel(logging.DEBUG)
++        logging.getLogger("async_upnp_client.traffic").setLevel(logging.INFO)
++        logging.getLogger("async_upnp_client.advertisement").setLevel(logging.INFO)
++        logging.getLogger("async_upnp_client.search").setLevel(logging.INFO)
++    else:
++        logging.getLogger("pywam").setLevel(logging.CRITICAL)
++        logging.getLogger("async_upnp_client").setLevel(logging.CRITICAL)
++
++    return prov
++
++
++__all__ = ["get_config_entries", "setup"]
+diff --git a/music_assistant/providers/samsung_wam/consts.py b/music_assistant/providers/samsung_wam/consts.py
+new file mode 100644
+index 00000000000..5ef016095ba
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/consts.py
+@@ -0,0 +1,49 @@
++"""Global constants and configurations for the Samsung WAM provider."""
++
++from music_assistant_models.config_entries import MULTI_VALUE_SPLITTER, ConfigEntry
++from music_assistant_models.enums import PlayerFeature
++
++from music_assistant.constants import CONF_ENTRY_HTTP_PROFILE, CONF_ENTRY_SAMPLE_RATES
++
++# --- Global Provider Settings ---
++
++MANUFACTURER_NAME = "Samsung"
++
++COMMAND_RETRY_ATTEMPTS = 3
++COMMAND_RETRY_BACKOFF = 1.0
++
++PLAYER_FEATURES_BASE = {
++    PlayerFeature.PLAY_MEDIA,
++    PlayerFeature.PAUSE,
++    PlayerFeature.NEXT_PREVIOUS,
++    PlayerFeature.VOLUME_SET,
++    PlayerFeature.VOLUME_MUTE,
++    PlayerFeature.SET_MEMBERS,
++    PlayerFeature.SELECT_SOURCE,
++}
++
++# --- Configuration Entries ---
++
++CONF_ENTRY_SAMPLE_RATES_WAM = ConfigEntry.from_dict(
++    {
++        **CONF_ENTRY_SAMPLE_RATES.to_dict(),
++        "default_value": [
++            f"44100{MULTI_VALUE_SPLITTER}16",
++            f"44100{MULTI_VALUE_SPLITTER}24",
++            f"48000{MULTI_VALUE_SPLITTER}16",
++            f"48000{MULTI_VALUE_SPLITTER}24",
++            f"88200{MULTI_VALUE_SPLITTER}16",
++            f"88200{MULTI_VALUE_SPLITTER}24",
++            f"96000{MULTI_VALUE_SPLITTER}16",
++            f"96000{MULTI_VALUE_SPLITTER}24",
++            f"176400{MULTI_VALUE_SPLITTER}16",
++            f"176400{MULTI_VALUE_SPLITTER}24",
++            f"192000{MULTI_VALUE_SPLITTER}16",
++            f"192000{MULTI_VALUE_SPLITTER}24",
++        ],
++    }
++)
++
++CONF_ENTRY_HTTP_PROFILE_WAM = ConfigEntry.from_dict(
++    {**CONF_ENTRY_HTTP_PROFILE.to_dict(), "default_value": "forced_content_length"}
++)
+diff --git a/music_assistant/providers/samsung_wam/exceptions.py b/music_assistant/providers/samsung_wam/exceptions.py
+new file mode 100644
+index 00000000000..174480a0690
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/exceptions.py
+@@ -0,0 +1,5 @@
++"""Custom exceptions for the Samsung WAM provider."""
++
++
++class PlayerDisabledError(Exception):
++    """Signal that the player is disabled in configuration and setup should be aborted."""
+diff --git a/music_assistant/providers/samsung_wam/features/__init__.py b/music_assistant/providers/samsung_wam/features/__init__.py
+new file mode 100644
+index 00000000000..5c1ad081837
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/__init__.py
+@@ -0,0 +1 @@
++"""Features for the Samsung WAM provider."""
+diff --git a/music_assistant/providers/samsung_wam/features/base.py b/music_assistant/providers/samsung_wam/features/base.py
+new file mode 100644
+index 00000000000..3facb6758e4
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/base.py
+@@ -0,0 +1,156 @@
++"""Base classes for WAM features."""
++
++from __future__ import annotations
++
++import asyncio
++from collections.abc import Callable, Coroutine
++from functools import wraps
++from logging import Logger
++from typing import TYPE_CHECKING, Any
++
++from music_assistant_models.errors import PlayerCommandFailed
++from pywam.lib.exceptions import ApiCallTimeoutError, PywamError
++
++from music_assistant.providers.samsung_wam.consts import (
++    COMMAND_RETRY_ATTEMPTS,
++    COMMAND_RETRY_BACKOFF,
++)
++
++if TYPE_CHECKING:
++    from pywam.speaker import Speaker
++
++    from music_assistant.mass import MusicAssistant
++    from music_assistant.providers.samsung_wam.player import WamPlayer
++    from music_assistant.providers.samsung_wam.provider import SamsungWamProvider
++
++
++class WamProviderFeatureBase:
++    """Base class for provider-scoped feature handlers."""
++
++    def __init__(self, provider: SamsungWamProvider) -> None:
++        """Initialize the feature base with the parent provider instance.
++
++        :param provider: The SamsungWamProvider instance.
++        """
++        self.provider = provider
++
++    @property
++    def mass(self) -> MusicAssistant:
++        """Return the MusicAssistant instance."""
++        return self.provider.mass
++
++    @property
++    def logger(self) -> Logger:
++        """Return the provider's dedicated logger."""
++        return self.provider.logger
++
++    @property
++    def players(self) -> dict[str, WamPlayer]:
++        """Return a shortcut to the provider's collection of WamPlayer instances."""
++        return self.provider.wam_players
++
++
++class WamPlayerFeatureBase:
++    """Base class for player-scoped feature handlers."""
++
++    def __init__(self, player: WamPlayer) -> None:
++        """Initialize the feature base with the parent player instance.
++
++        :param player: The WamPlayer instance.
++        """
++        self.player = player
++
++    @property
++    def mass(self) -> MusicAssistant:
++        """Return the MusicAssistant instance."""
++        return self.player.mass
++
++    @property
++    def speaker(self) -> Speaker:
++        """Return the pywam Speaker instance."""
++        return self.player.speaker
++
++    @property
++    def logger(self) -> Logger:
++        """Return the player's dedicated logger."""
++        return self.player.logger
++
++
++def retry_command(
++    attempts: int = COMMAND_RETRY_ATTEMPTS,
++    initial_backoff: float = COMMAND_RETRY_BACKOFF,
++) -> Callable[[Callable[..., Coroutine[Any, Any, Any]]], Callable[..., Coroutine[Any, Any, Any]]]:
++    """Decorate a player command to retry on temporary failures.
++
++    :param attempts: Total number of attempts to make.
++    :param initial_backoff: Initial wait time in seconds before retrying.
++    """
++
++    def decorator(
++        func: Callable[..., Coroutine[Any, Any, Any]],
++    ) -> Callable[..., Coroutine[Any, Any, Any]]:
++        @wraps(func)
++        async def wrapper(self: WamPlayerFeatureBase, *args: Any, **kwargs: Any) -> Any:
++            backoff_delay = initial_backoff
++            last_error: Exception | None = None
++
++            for attempt in range(attempts):
++                try:
++                    await self.player.state_sync.ensure_speaker_connected()
++                    result = await func(self, *args, **kwargs)
++
++                    if attempt > 0:
++                        self.logger.debug(
++                            "Command '%s' successfully recovered on attempt %s/%s.",
++                            func.__name__,
++                            attempt + 1,
++                            attempts,
++                        )
++                    return result
++
++                except (TimeoutError, PlayerCommandFailed, PywamError) as err:
++                    last_error = err
++                    if attempt < attempts - 1:
++                        self.logger.debug(
++                            "Command '%s' failed on attempt %s/%s. Retrying in %.1fs.",
++                            func.__name__,
++                            attempt + 1,
++                            attempts,
++                            backoff_delay,
++                        )
++                        await asyncio.sleep(backoff_delay)
++                        backoff_delay *= 2
++                    else:
++                        self.logger.debug(
++                            "Command '%s' failed on final attempt %s/%s.",
++                            func.__name__,
++                            attempt + 1,
++                            attempts,
++                        )
++
++            self.logger.warning("Command '%s' failed after %s attempts.", func.__name__, attempts)
++            raise PlayerCommandFailed(
++                f"Command '{func.__name__}' failed after {attempts} attempts"
++            ) from last_error
++
++        return wrapper
++
++    return decorator
++
++
++def handle_pywam_errors(
++    func: Callable[..., Coroutine[Any, Any, Any]],
++) -> Callable[..., Coroutine[Any, Any, Any]]:
++    """Decorate a command to translate pywam exceptions into MA exceptions."""
++
++    @wraps(func)
++    async def wrapper(self: WamPlayerFeatureBase, *args: Any, **kwargs: Any) -> Any:
++        try:
++            return await func(self, *args, **kwargs)
++        except ConnectionError as err:
++            self.logger.warning("Command failed with ConnectionError.")
++            raise PlayerCommandFailed("Connection lost") from err
++        except (ApiCallTimeoutError, TimeoutError, PywamError) as err:
++            raise PlayerCommandFailed(str(err)) from err
++
++    return wrapper
+diff --git a/music_assistant/providers/samsung_wam/features/device_config/__init__.py b/music_assistant/providers/samsung_wam/features/device_config/__init__.py
+new file mode 100644
+index 00000000000..5b2e1f33e0d
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/device_config/__init__.py
+@@ -0,0 +1 @@
++"""Device configuration feature."""
+diff --git a/music_assistant/providers/samsung_wam/features/device_config/handler.py b/music_assistant/providers/samsung_wam/features/device_config/handler.py
+new file mode 100644
+index 00000000000..00de934e0f5
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/device_config/handler.py
+@@ -0,0 +1,22 @@
++"""Device configuration handler."""
++
++from __future__ import annotations
++
++from music_assistant.providers.samsung_wam.features.base import (
++    WamPlayerFeatureBase,
++    handle_pywam_errors,
++    retry_command,
++)
++
++
++class DeviceConfigHandler(WamPlayerFeatureBase):
++    """Encapsulates device configuration commands."""
++
++    @retry_command()
++    @handle_pywam_errors
++    async def set_name(self, name: str) -> None:
++        """Set the friendly hostname on the physical device.
++
++        :param name: The desired friendly name.
++        """
++        await self.speaker.set_name(name)
+diff --git a/music_assistant/providers/samsung_wam/features/discovery/__init__.py b/music_assistant/providers/samsung_wam/features/discovery/__init__.py
+new file mode 100644
+index 00000000000..443abb2bc8c
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/discovery/__init__.py
+@@ -0,0 +1 @@
++"""Discovery feature."""
+diff --git a/music_assistant/providers/samsung_wam/features/discovery/consts.py b/music_assistant/providers/samsung_wam/features/discovery/consts.py
+new file mode 100644
+index 00000000000..359b5d584f2
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/discovery/consts.py
+@@ -0,0 +1,8 @@
++"""Constants specific to discovery."""
++
++UPNP_PORT = 7676
++UPNP_DEVICE_DESCRIPTION_PATH = "/smp_3_"
++SSDP_ST = "urn:samsung.com:device:RemoteControlReceiver:1"
++PROBE_INTERVAL = 20  # seconds
++PROBE_TASK_ID = "wam_periodic_probe"
++PROBE_TIMEOUT = 10  # seconds
+diff --git a/music_assistant/providers/samsung_wam/features/discovery/handler.py b/music_assistant/providers/samsung_wam/features/discovery/handler.py
+new file mode 100644
+index 00000000000..9f463894a05
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/discovery/handler.py
+@@ -0,0 +1,209 @@
++"""Discovery handler."""
++
++from __future__ import annotations
++
++import asyncio
++import xml.etree.ElementTree as ET
++from http import HTTPStatus
++from typing import TYPE_CHECKING, cast
++
++import aiohttp
++from aiohttp import ClientTimeout
++from defusedxml import ElementTree as DefusedET
++from pywam.speaker import Speaker
++
++from music_assistant.constants import CONF_ENTRY_MANUAL_DISCOVERY_IPS
++from music_assistant.providers.samsung_wam.exceptions import PlayerDisabledError
++from music_assistant.providers.samsung_wam.features.base import WamProviderFeatureBase
++from music_assistant.providers.samsung_wam.features.state_sync.mapper import StateSyncMapper
++from music_assistant.providers.samsung_wam.player import WamPlayer
++
++from .consts import (
++    PROBE_INTERVAL,
++    PROBE_TASK_ID,
++    PROBE_TIMEOUT,
++    UPNP_DEVICE_DESCRIPTION_PATH,
++    UPNP_PORT,
++)
++from .models import DiscoveryEventType, DiscoveryInfo, DiscoverySource, ProbeResult
++from .ssdp_listener import DiscoverySsdpListener
++
++if TYPE_CHECKING:
++    from music_assistant.providers.samsung_wam.provider import SamsungWamProvider
++
++
++class DiscoveryHandler(WamProviderFeatureBase):
++    """Coordinates finding and initializing speakers on the network."""
++
++    def __init__(self, provider: SamsungWamProvider) -> None:
++        """Initialize the discovery handler.
++
++        :param provider: The SamsungWamProvider instance.
++        """
++        super().__init__(provider)
++        self._ssdp_listener = DiscoverySsdpListener(self._handle_ssdp_event, self.logger)
++        self._discovery_locks: dict[str, asyncio.Lock] = {}
++        self._discover_task: asyncio.Task[None] | None = None
++
++    async def start(self) -> None:
++        """Start discovery mechanisms."""
++        self._discover_task = self.mass.create_task(self._ssdp_listener.start())
++        self.logger.debug("SSDP discovery listener started")
++
++        manual_ips: list[str] = (
++            cast("list[str]", self.provider.config.get_value(CONF_ENTRY_MANUAL_DISCOVERY_IPS.key))
++            or []
++        )
++        await self._probe_ips(manual_ips, DiscoverySource.MANUAL)
++
++        self.mass.create_task(self._periodic_probe_task(), task_id=PROBE_TASK_ID)
++
++    async def stop(self) -> None:
++        """Stop discovery mechanisms."""
++        self.mass.cancel_task(PROBE_TASK_ID)
++        if self._discover_task and not self._discover_task.done():
++            self._discover_task.cancel()
++        await self._ssdp_listener.stop()
++
++    async def _handle_ssdp_event(self, info: DiscoveryInfo) -> None:
++        """Process callback from SSDP infrastructure.
++
++        :param info: Information about the discovery event.
++        """
++        if info.event_type == DiscoveryEventType.PRESENCE:
++            # Re-probe to verify model compliance and alive status
++            if await self.probe_ip(info.ip_address):
++                await self.handle_discovery_event(info)
++        else:
++            await self.handle_discovery_event(info)
++
++    async def probe_ip(self, ip_address: str) -> ProbeResult | None:
++        """Perform an active probe to check if a device is online and valid.
++
++        :param ip_address: The IP address to probe.
++        :return: A ProbeResult if the device is valid, else None.
++        """
++        location = f"http://{ip_address}:{UPNP_PORT}{UPNP_DEVICE_DESCRIPTION_PATH}"
++        try:
++            async with self.mass.http_session.get(
++                location, timeout=ClientTimeout(total=PROBE_TIMEOUT)
++            ) as resp:
++                if resp.status != HTTPStatus.OK:
++                    return None
++                xml_text = await resp.text()
++
++            root = DefusedET.fromstring(xml_text)
++            model_name = (
++                element.text if (element := root.find(".//{*}modelName")) is not None else "Unknown"
++            )
++
++            if model_name not in self.provider.supported_models:
++                return None
++
++            udn = element.text if (element := root.find(".//{*}UDN")) is not None else None
++            if not udn:
++                return None
++
++            udn = udn.removeprefix("uuid:")
++            return ProbeResult(udn=udn, model_name=model_name)
++        except (TimeoutError, aiohttp.ClientError, ET.ParseError):
++            return None
++
++    async def handle_discovery_event(self, info: DiscoveryInfo) -> None:
++        """Process a validated discovery event.
++
++        :param info: The discovery details.
++        """
++        lock = self._discovery_locks.setdefault(info.udn, asyncio.Lock())
++        async with lock:
++            if info.event_type == DiscoveryEventType.OFFLINE:
++                self.logger.debug("Received offline broadcast for %s", info.udn)
++                return
++
++            if info.event_type == DiscoveryEventType.PRESENCE:
++                existing_player = self._get_player_by_udn(info.udn)
++                if existing_player:
++                    if not existing_player.available:
++                        await existing_player.poll()
++                else:
++                    await self._setup_player(info)
++
++    async def _probe_ips(self, ips_to_probe: list[str], source: DiscoverySource) -> None:
++        """Actively probe a list of IP addresses.
++
++        :param ips_to_probe: List of IP addresses to probe.
++        :param source: The source of the discovery trigger.
++        """
++        for ip in (ip for ip in ips_to_probe if ip):
++            self.logger.debug("Performing active probe for IP: %s (source: %s)", ip, source.value)
++            if probe_result := await self.probe_ip(ip):
++                info = DiscoveryInfo(
++                    udn=probe_result.udn,
++                    ip_address=ip,
++                    event_type=DiscoveryEventType.PRESENCE,
++                    discovery_source=source,
++                )
++                await self.handle_discovery_event(info)
++
++    async def _periodic_probe_task(self) -> None:
++        """Background task to periodically probe known manual IPs."""
++        while not self.mass.closing:
++            try:
++                await asyncio.sleep(PROBE_INTERVAL)
++                ips_to_check: set[str] = set()
++                manual_ips: list[str] = (
++                    cast(
++                        "list[str]",
++                        self.provider.config.get_value(CONF_ENTRY_MANUAL_DISCOVERY_IPS.key),
++                    )
++                    or []
++                )
++                ips_to_check.update(manual_ips)
++                if ips_to_check:
++                    await self._probe_ips(list(ips_to_check), DiscoverySource.MANUAL)
++            except asyncio.CancelledError:
++                break
++            except Exception as err:
++                self.logger.warning("Error in periodic probe task: %s", err, exc_info=err)
++
++    async def _setup_player(self, info: DiscoveryInfo) -> None:
++        """Initialize and register a newly discovered player.
++
++        :param info: Information about the discovered device.
++        """
++        self.logger.debug("Pre-flight connection to new player at %s", info.ip_address)
++
++        temp_speaker = Speaker(info.ip_address)
++        await temp_speaker.connect()
++
++        try:
++            await temp_speaker.update()
++
++            attrs = StateSyncMapper.create_speaker_attributes(temp_speaker)
++            if not attrs.mac:
++                raise ConnectionError("Failed to get MAC address during pre-flight.")
++
++            if not self.mass.config.get_raw_player_config_value(attrs.mac, "enabled", True):
++                raise PlayerDisabledError("Player disabled in configuration.")
++
++            player = WamPlayer(self.provider, info.ip_address, info.udn, attrs.mac, temp_speaker)
++            player.state_sync.apply_initial_state(attrs)
++
++            await self.mass.players.register_or_update(player)
++            self.players[player.player_id] = player
++            self.provider.groups.register_player(player)
++
++        except PlayerDisabledError:
++            self.logger.debug("Player at %s is disabled in configuration.", info.ip_address)
++            await temp_speaker.disconnect()
++        except Exception as err:
++            self.logger.warning("Failed to set up player at %s: %s", info.ip_address, err)
++            await temp_speaker.disconnect()
++
++    def _get_player_by_udn(self, udn: str) -> WamPlayer | None:
++        """Retrieve an existing player by its UDN.
++
++        :param udn: The Universal Device Name to search for.
++        :return: The matching WamPlayer instance or None.
++        """
++        return next((p for p in self.players.values() if p.udn == udn), None)
+diff --git a/music_assistant/providers/samsung_wam/features/discovery/models.py b/music_assistant/providers/samsung_wam/features/discovery/models.py
+new file mode 100644
+index 00000000000..5a6a0117be9
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/discovery/models.py
+@@ -0,0 +1,36 @@
++"""Models specific to discovery."""
++
++from dataclasses import dataclass
++from enum import StrEnum
++
++
++class DiscoveryEventType(StrEnum):
++    """Enumeration for the type of discovery event."""
++
++    PRESENCE = "presence"
++    OFFLINE = "offline"
++
++
++class DiscoverySource(StrEnum):
++    """Enumeration for the source of a discovery event."""
++
++    SSDP = "ssdp"
++    MANUAL = "manual"
++
++
++@dataclass
++class DiscoveryInfo:
++    """Holds information about a network discovery event."""
++
++    udn: str
++    ip_address: str
++    event_type: DiscoveryEventType
++    discovery_source: DiscoverySource
++
++
++@dataclass
++class ProbeResult:
++    """Holds the result of a successful device probe."""
++
++    udn: str
++    model_name: str
+diff --git a/music_assistant/providers/samsung_wam/features/discovery/ssdp_listener.py b/music_assistant/providers/samsung_wam/features/discovery/ssdp_listener.py
+new file mode 100644
+index 00000000000..3cc8ce0e33d
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/discovery/ssdp_listener.py
+@@ -0,0 +1,75 @@
++"""Discovery SSDP listener."""
++
++from __future__ import annotations
++
++import logging
++from collections.abc import Awaitable, Callable
++from urllib.parse import urlparse
++
++from async_upnp_client.const import SsdpSource
++from async_upnp_client.ssdp_listener import SsdpDevice, SsdpListener
++
++from .consts import SSDP_ST
++from .models import DiscoveryEventType, DiscoveryInfo, DiscoverySource
++
++
++class DiscoverySsdpListener:
++    """Encapsulates SSDP discovery logic."""
++
++    def __init__(
++        self, callback: Callable[[DiscoveryInfo], Awaitable[None]], logger: logging.Logger
++    ) -> None:
++        """Initialize the SSDP listener.
++
++        :param callback: The async function to call when an event occurs.
++        :param logger: The logger to use.
++        """
++        self._callback = callback
++        self.logger = logger
++        self._ssdp_listener: SsdpListener | None = None
++
++    async def start(self) -> None:
++        """Start the SSDP listener and trigger an initial search."""
++        self._ssdp_listener = SsdpListener(
++            async_callback=self._on_ssdp_response, search_target=SSDP_ST
++        )
++        await self._ssdp_listener.async_start()
++        await self._ssdp_listener.async_search()
++
++    async def stop(self) -> None:
++        """Stop the SSDP passive listener and clean up resources."""
++        if self._ssdp_listener:
++            await self._ssdp_listener.async_stop()
++
++    async def _on_ssdp_response(
++        self, device: SsdpDevice, service_type: str, source: SsdpSource
++    ) -> None:
++        """Handle an incoming SSDP response.
++
++        :param device: The discovered SSDP device.
++        :param service_type: The service type advertised.
++        :param source: The source of the event.
++        """
++        if service_type != SSDP_ST or not device.udn:
++            return
++
++        if source == SsdpSource.ADVERTISEMENT_BYEBYE:
++            info = DiscoveryInfo(
++                udn=device.udn,
++                ip_address="",
++                event_type=DiscoveryEventType.OFFLINE,
++                discovery_source=DiscoverySource.SSDP,
++            )
++            await self._callback(info)
++        elif device.location:
++            # We must pass this to the handler to perform the IP probe,
++            # so we map it as a presence event containing the location URI.
++            ip_address = urlparse(device.location).hostname
++            if ip_address:
++                info = DiscoveryInfo(
++                    udn=device.udn,
++                    ip_address=ip_address,
++                    event_type=DiscoveryEventType.PRESENCE,
++                    discovery_source=DiscoverySource.SSDP,
++                )
++                await self._callback(info)
+diff --git a/music_assistant/providers/samsung_wam/features/grouping/__init__.py b/music_assistant/providers/samsung_wam/features/grouping/__init__.py
+new file mode 100644
+index 00000000000..5ba7c986e47
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/grouping/__init__.py
+@@ -0,0 +1 @@
++"""Grouping feature."""
+diff --git a/music_assistant/providers/samsung_wam/features/grouping/consts.py b/music_assistant/providers/samsung_wam/features/grouping/consts.py
+new file mode 100644
+index 00000000000..14907811756
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/grouping/consts.py
+@@ -0,0 +1,4 @@
++"""Constants specific to grouping."""
++
++GROUP_SYNC_DEBOUNCE = 5.0
++GROUP_SYNC_TASK_ID = "wam_initial_group_sync"
+diff --git a/music_assistant/providers/samsung_wam/features/grouping/coordinator.py b/music_assistant/providers/samsung_wam/features/grouping/coordinator.py
+new file mode 100644
+index 00000000000..d570bc78474
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/grouping/coordinator.py
+@@ -0,0 +1,189 @@
++"""Grouping coordinator."""
++
++from __future__ import annotations
++
++import asyncio
++from typing import TYPE_CHECKING
++
++from music_assistant.providers.samsung_wam.features.base import WamProviderFeatureBase
++
++from .consts import GROUP_SYNC_DEBOUNCE, GROUP_SYNC_TASK_ID
++
++if TYPE_CHECKING:
++    from music_assistant.providers.samsung_wam.player import WamPlayer
++    from music_assistant.providers.samsung_wam.provider import SamsungWamProvider
++
++
++class GroupingCoordinator(WamProviderFeatureBase):
++    """Manages group membership state across all registered players."""
++
++    def __init__(self, provider: SamsungWamProvider) -> None:
++        """Initialize the group coordinator.
++
++        :param provider: The SamsungWamProvider instance.
++        """
++        super().__init__(provider)
++        # Lock to ensure only one grouping command is processed at a time.
++        self._lock = asyncio.Lock()
++
++        # Primary Map (Leader -> Children): Used to quickly get all members of a specific group.
++        self.states: dict[str, set[str]] = {}
++        # Reverse Lookup Map (Child -> Leader): Used for O(1) lookups to see if a player is grouped.
++        self._child_to_leader: dict[str, str] = {}
++
++    # --- Lifecycle & Synchronization ---
++
++    def start_sync_task(self) -> None:
++        """Schedule the initial state sync task."""
++        self.mass.call_later(
++            GROUP_SYNC_DEBOUNCE, self.synchronize_states, task_id=GROUP_SYNC_TASK_ID
++        )
++
++    def stop_sync_task(self) -> None:
++        """Cancel the state sync task."""
++        self.mass.cancel_timer(GROUP_SYNC_TASK_ID)
++        self.mass.cancel_task(GROUP_SYNC_TASK_ID)
++
++    def synchronize_states(self) -> None:
++        """Rebuild internal maps entirely from the current reality of all physical players."""
++        self.states.clear()
++        self._child_to_leader.clear()
++        for player in self.players.values():
++            synced_to = getattr(player, "synced_to_internal", None)
++            if synced_to:
++                self.states.setdefault(synced_to, set()).add(player.player_id)
++                self._child_to_leader[player.player_id] = synced_to
++
++    def register_player(self, player: WamPlayer) -> None:
++        """Register a new player for group tracking.
++
++        :param player: The WamPlayer to register.
++        """
++        self._update_player_membership(player.player_id, player.synced_to)
++        if player.synced_to:
++            if leader_player := self.players.get(player.synced_to):
++                leader_player.update_state()
++
++    def unregister_player(self, player: WamPlayer) -> None:
++        """Unregister a player from group tracking.
++
++        :param player: The WamPlayer to unregister.
++        """
++        self._remove_player_from_all_groups(player.player_id)
++
++    # --- MA Initiated ---
++
++    async def set_members(
++        self,
++        leader_id: str,
++        adds: list[str] | None = None,
++        removes: list[str] | None = None,
++    ) -> None:
++        """Handle group membership changes.
++
++        :param leader_id: The target group leader.
++        :param adds: List of member IDs to add.
++        :param removes: List of member IDs to remove.
++        """
++        target_children = self._calculate_target_members(leader_id, adds, removes)
++        await self._apply_group(leader_id=leader_id, target_children=target_children)
++
++    def _calculate_target_members(
++        self,
++        leader_id: str,
++        adds: list[str] | None,
++        removes: list[str] | None,
++    ) -> set[str]:
++        """Compute the new group membership set based on requested additions and removals.
++
++        :param leader_id: The target group leader.
++        :param adds: List of member IDs to add.
++        :param removes: List of member IDs to remove.
++        :return: A set of player IDs representing the desired target children.
++        """
++        target_children = set(self.states.get(leader_id, set()))
++
++        if adds:
++            target_children.update(adds)
++        if removes:
++            target_children.difference_update(removes)
++
++        target_children.discard(leader_id)  # Sanity check: leader cannot be its own child
++        return target_children
++
++    async def _apply_group(self, leader_id: str, target_children: set[str]) -> None:
++        """Apply absolute group membership changes.
++
++        :param leader_id: The ID of the target group leader.
++        :param target_children: The complete, desired set of child members.
++        """
++        async with self._lock:
++            leader = self.players.get(leader_id)
++            if not leader:
++                return
++
++            children_before = [
++                p for pid in self.states.get(leader_id, set()) if (p := self.players.get(pid))
++            ]
++            children_after = [p for pid in target_children if (p := self.players.get(pid))]
++            children_to_remove = set(children_before) - set(children_after)
++
++            ungroup_tasks = [child.grouping.leave_group() for child in children_to_remove]
++            await asyncio.gather(*ungroup_tasks)
++
++            if children_after:
++                group_name = f"{leader.log_name} Group"
++                await leader.grouping.form_group(children_after, group_name)
++            else:
++                await leader.grouping.leave_group()
++
++    # --- Hardware Initiated ---
++
++    def on_player_state_changed(self, player: WamPlayer) -> None:
++        """Process a state broadcast from a speaker and detect external grouping changes.
++
++        This handles scenarios where a speaker boots up into a previous group,
++        or a user changes groups via the official Samsung WAM mobile app.
++
++        :param player: The WamPlayer whose state changed.
++        """
++        old_leader_id = self._child_to_leader.get(player.player_id)
++        new_leader_id = getattr(player, "synced_to_internal", None)
++
++        if old_leader_id == new_leader_id:
++            return
++
++        affected_leader_ids = {old_leader_id, new_leader_id}
++        self._update_player_membership(player.player_id, new_leader_id)
++
++        for pid in affected_leader_ids:
++            if pid and pid != player.player_id:
++                if p := self.players.get(pid):
++                    p.update_state()
++
++    # --- Internal Helpers ---
++
++    def _update_player_membership(self, player_id: str, new_leader_id: str | None) -> None:
++        """Update the dual-maps to reflect a player's new group status.
++
++        :param player_id: The child player ID.
++        :param new_leader_id: The new leader's ID (or None if ungrouped).
++        """
++        self._remove_player_from_all_groups(player_id)
++        if new_leader_id:
++            self.states.setdefault(new_leader_id, set()).add(player_id)
++            self._child_to_leader[player_id] = new_leader_id
++
++    def _remove_player_from_all_groups(self, player_id: str) -> None:
++        """Scrub a player from the dual-maps completely.
++
++        :param player_id: The player ID to remove.
++        """
++        if old_leader_id := self._child_to_leader.pop(player_id, None):
++            if old_leader_id in self.states:
++                self.states[old_leader_id].discard(player_id)
++                if not self.states[old_leader_id]:
++                    del self.states[old_leader_id]
++        if player_id in self.states:
++            for child_id in self.states.pop(player_id, set()):
++                self._child_to_leader.pop(child_id, None)
+diff --git a/music_assistant/providers/samsung_wam/features/grouping/handler.py b/music_assistant/providers/samsung_wam/features/grouping/handler.py
+new file mode 100644
+index 00000000000..3276be797e7
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/grouping/handler.py
+@@ -0,0 +1,45 @@
++"""Grouping handler."""
++
++from __future__ import annotations
++
++from typing import TYPE_CHECKING
++
++from pywam.lib import api_call
++
++from music_assistant.providers.samsung_wam.features.base import (
++    WamPlayerFeatureBase,
++    handle_pywam_errors,
++    retry_command,
++)
++
++if TYPE_CHECKING:
++    from music_assistant.providers.samsung_wam.player import WamPlayer
++
++
++class GroupingHandler(WamPlayerFeatureBase):
++    """Encapsulates all grouping commands sent to a speaker."""
++
++    @retry_command()
++    @handle_pywam_errors
++    async def form_group(self, group_children: list[WamPlayer], group_name: str) -> None:
++        """Instruct the speaker to form a group with specified members.
++
++        :param group_children: A list of WamPlayer instances to join.
++        :param group_name: The name to apply to the newly formed group.
++        """
++        child_players = [{"ip": p.ip_address, "mac": p.player_id} for p in group_children]
++
++        group_command = api_call.set_multispk_group_mainspk(
++            name=group_name,
++            spknum=len(child_players) + 1,
++            audiosourcemacaddr=self.player.player_id,
++            audiosourcename=self.player.name,
++            subspeakers=child_players,
++        )
++        await self.speaker.client.request(group_command)
++
++    @retry_command()
++    @handle_pywam_errors
++    async def leave_group(self) -> None:
++        """Instruct the speaker to leave its current group."""
++        await self.speaker.client.request(api_call.set_ungroup())
+diff --git a/music_assistant/providers/samsung_wam/features/playback/__init__.py b/music_assistant/providers/samsung_wam/features/playback/__init__.py
+new file mode 100644
+index 00000000000..5072df6ea31
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/playback/__init__.py
+@@ -0,0 +1 @@
++"""Playback feature."""
+diff --git a/music_assistant/providers/samsung_wam/features/playback/consts.py b/music_assistant/providers/samsung_wam/features/playback/consts.py
+new file mode 100644
+index 00000000000..cd52d6fab7c
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/playback/consts.py
+@@ -0,0 +1,3 @@
++"""Constants specific to playback."""
++
++SOURCE_CHANGE_TIMEOUT = 5  # seconds
+diff --git a/music_assistant/providers/samsung_wam/features/playback/handler.py b/music_assistant/providers/samsung_wam/features/playback/handler.py
+new file mode 100644
+index 00000000000..e5c2e57a0b2
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/playback/handler.py
+@@ -0,0 +1,131 @@
++"""Playback handler."""
++
++from __future__ import annotations
++
++import time
++from typing import TYPE_CHECKING
++
++from music_assistant_models.errors import PlayerCommandFailed
++from pywam.lib.exceptions import PywamError
++from pywam.lib.url import UrlMediaItem
++
++from music_assistant.providers.samsung_wam.features.base import (
++    WamPlayerFeatureBase,
++    handle_pywam_errors,
++    retry_command,
++)
++
++from .consts import SOURCE_CHANGE_TIMEOUT
++from .models import WamSource
++
++if TYPE_CHECKING:
++    from music_assistant_models.player import PlayerMedia
++
++
++class PlaybackHandler(WamPlayerFeatureBase):
++    """Encapsulates playback and media-related commands."""
++
++    @retry_command()
++    @handle_pywam_errors
++    async def stop(self) -> None:
++        """Send STOP command to player."""
++        # WAM does not have a discrete stop, so we treat pause as stop.
++        self.player.stream_active = False
++        await self.speaker.cmd_pause()
++
++        # Reset tracking properties entirely
++        self.player._attr_elapsed_time = None
++        self.player._attr_elapsed_time_last_updated = None
++
++        # Force a refresh. This will likely map to PAUSED or IDLE depending on speaker response.
++        self.player.state_sync.refresh_state(notify_provider=True)
++
++    @retry_command()
++    @handle_pywam_errors
++    async def play(self) -> None:
++        """Resume playback on the speaker."""
++        if self.player.active_source == self.player.player_id:
++            await self.mass.player_queues.resume(self.player.player_id)
++            return
++
++        await self.speaker.cmd_play()
++
++        # We are resuming from a pause on a non-queue source. Refresh the last_updated
++        # timestamp so corrected_elapsed_time doesn't count the pause time.
++        if self.player.elapsed_time is not None:
++            self.player._attr_elapsed_time = self.player.corrected_elapsed_time
++            self.player._attr_elapsed_time_last_updated = time.time()
++            self.player.update_state()
++
++    @retry_command()
++    @handle_pywam_errors
++    async def pause(self) -> None:
++        """Pause playback on the speaker."""
++        await self.speaker.cmd_pause()
++
++        # Request exact play time to ensure an accurate pause marker
++        await self.player.state_sync.update_play_time()
++        self.player.update_state()
++
++    @retry_command()
++    @handle_pywam_errors
++    async def play_media(self, media: PlayerMedia) -> None:
++        """Stream a media URI to the speaker.
++
++        :param media: The details of the media stream to play.
++        """
++        if getattr(self.player, "synced_to_internal", None):
++            raise PlayerCommandFailed(f"Player {self.player.log_name} is a group child.")
++
++        if self.player.active_source != WamSource.WIFI:
++            await self.select_source(WamSource.WIFI)
++
++        stream_url = await self.mass.streams.resolve_stream_url(self.player.player_id, media)
++
++        item = UrlMediaItem(
++            url=stream_url,
++            title=media.title,
++            description=media.artist,
++            duration=str(int(media.duration)) if media.duration else "0",
++            thumbnail=media.image_url,
++        )
++
++        try:
++            self.player.stream_active = True
++
++            self.player._attr_elapsed_time = 0.0
++            self.player._attr_elapsed_time_last_updated = time.time()
++            self.player.update_state()
++
++            await self.speaker.play_url(item)
++
++        except (PywamError, PlayerCommandFailed) as err:
++            self.player.stream_active = False
++            raise PlayerCommandFailed(f"Failed to play media on WAM speaker: {err}") from err
++
++    @retry_command()
++    @handle_pywam_errors
++    async def select_source(self, source: WamSource | str) -> None:
++        """Change the input source on the speaker.
++
++        :param source: The target source identifier.
++        """
++        try:
++            target_source = WamSource.WIFI if source == self.player.player_id else WamSource(source)
++        except ValueError as err:
++            raise PlayerCommandFailed(
++                f"'{source}' is not a valid source for: {self.player.log_name}"
++            ) from err
++
++        if self.player.active_source == str(target_source):
++            return
++
++        if target_source != WamSource.WIFI:
++            self.player.stream_active = False
++
++        await self.speaker.select_source(str(target_source))
++
++        def check_source() -> bool:
++            return self.player.active_source == str(target_source)
++
++        await self.player.await_state_change(check_source, SOURCE_CHANGE_TIMEOUT)
+diff --git a/music_assistant/providers/samsung_wam/features/playback/models.py b/music_assistant/providers/samsung_wam/features/playback/models.py
+new file mode 100644
+index 00000000000..57448523c80
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/playback/models.py
+@@ -0,0 +1,21 @@
++"""Models specific to playback."""
++
++from enum import StrEnum
++
++
++class WamSource(StrEnum):
++    """Enum for WAM player sources."""
++
++    WIFI = "Wi-Fi"
++    BLUETOOTH = "Bluetooth"
++    AUX = "AUX"
++    OPTICAL = "Optical"
++    TV_SOUNDCONNECT = "TV SoundConnect"
++
++
++class WamPlaybackState(StrEnum):
++    """Enum for WAM internal playback states."""
++
++    PLAY = "play"
++    PAUSE = "pause"
++    STOP = "stop"
+diff --git a/music_assistant/providers/samsung_wam/features/state_sync/__init__.py b/music_assistant/providers/samsung_wam/features/state_sync/__init__.py
+new file mode 100644
+index 00000000000..16b06e86e84
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/state_sync/__init__.py
+@@ -0,0 +1 @@
++"""State synchronization feature."""
+diff --git a/music_assistant/providers/samsung_wam/features/state_sync/consts.py b/music_assistant/providers/samsung_wam/features/state_sync/consts.py
+new file mode 100644
+index 00000000000..7f13b1bca68
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/state_sync/consts.py
+@@ -0,0 +1,4 @@
++"""Constants specific to state synchronization."""
++
++POLL_INTERVAL = 30  # seconds
++HEALTH_CHECK_TIMEOUT = 15  # seconds
+diff --git a/music_assistant/providers/samsung_wam/features/state_sync/handler.py b/music_assistant/providers/samsung_wam/features/state_sync/handler.py
+new file mode 100644
+index 00000000000..069cf45d63c
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/state_sync/handler.py
+@@ -0,0 +1,229 @@
++"""State synchronization handler."""
++
++from __future__ import annotations
++
++import asyncio
++import time
++from functools import partial
++from typing import TYPE_CHECKING, Any
++
++from music_assistant_models.enums import PlaybackState
++from music_assistant_models.errors import PlayerCommandFailed
++from music_assistant_models.player import DeviceInfo
++from pywam.lib.api_call import ApiCall
++from pywam.lib.exceptions import PywamError
++from pywam.speaker import Speaker
++
++from music_assistant.providers.samsung_wam.consts import MANUFACTURER_NAME
++from music_assistant.providers.samsung_wam.features.base import (
++    WamPlayerFeatureBase,
++    handle_pywam_errors,
++    retry_command,
++)
++
++from .consts import HEALTH_CHECK_TIMEOUT
++from .mapper import StateSyncMapper
++
++if TYPE_CHECKING:
++    from .models import WamSpeakerAttributes
++
++
++def get_speaker_status() -> ApiCall:
++    """(UIC) Get speaker status. Used for health checks."""
++    return ApiCall(api_type="UIC", method="GetSpeakerStatus", expected_response="SpeakerStatus")
++
++
++def get_current_play_time() -> ApiCall:
++    """(UIC) Get current play time."""
++    return ApiCall(api_type="UIC", method="GetCurrentPlayTime", expected_response="MusicPlayTime")
++
++
++class StateSyncHandler(WamPlayerFeatureBase):
++    """Encapsulates polling, state updates, and connection recovery."""
++
++    def apply_initial_state(self, attrs: WamSpeakerAttributes) -> None:
++        """Apply the initial state snapshot to the player during setup.
++
++        :param attrs: The initial speaker attributes.
++        """
++        self.player._attr_device_info = DeviceInfo(
++            model=attrs.model or "Unknown",
++            manufacturer=MANUFACTURER_NAME,
++            software_version=attrs.software_version,
++            identifiers=self.player._attr_device_info.identifiers,
++        )
++        self.suppress_speaker_status_events(self.speaker)
++        self._subscribe_speaker_events()
++        self.player._attr_available = True
++
++    async def poll(self) -> None:
++        """Poll the player for state updates and handle connection recovery."""
++        try:
++            async with self.player.connection_lock:
++                if not self.player.connected:
++                    self.logger.debug("Poller found disconnected speaker. Attempting reconnect.")
++                    self._mark_player_unavailable()
++                    await self._reconnect_speaker()
++
++            await self.check_status()
++
++            if self.player.playback_state == PlaybackState.PLAYING:
++                await self.update_play_time()
++
++            if not self.player.available:
++                self.logger.info("Player %s is back online.", self.player.log_name)
++                self.player._attr_available = True
++
++            self.player.update_state()
++
++        except (ConnectionError, PywamError, TimeoutError, PlayerCommandFailed) as err:
++            self.logger.debug(
++                "Poll failed for %s (%s). Dropping connection.",
++                self.player.log_name,
++                err.__class__.__name__,
++            )
++            await self.disconnect_speaker()
++            self._mark_player_unavailable()
++
++    def _mark_player_unavailable(self) -> None:
++        """Mark the player as unavailable and reset playback state."""
++        if not self.player.available:
++            return
++        self.player._attr_available = False
++        self.player._attr_playback_state = PlaybackState.IDLE
++        self.player.stream_active = False
++        self.player.update_state()
++
++    @retry_command()
++    @handle_pywam_errors
++    async def check_status(self) -> None:
++        """Verify device connectivity with a direct API call."""
++        if not self.player.connected:
++            raise ConnectionError("The underlying pywam client is not connected.")
++        async with asyncio.timeout(HEALTH_CHECK_TIMEOUT):
++            await self.speaker.client.request(get_speaker_status())
++
++    @retry_command()
++    @handle_pywam_errors
++    async def update_play_time(self) -> None:
++        """Fetch the current play time and synchronize."""
++        if not self.player.connected:
++            return
++
++        async with asyncio.timeout(HEALTH_CHECK_TIMEOUT):
++            response = await self.speaker.client.request(get_current_play_time())
++
++            if not response or not hasattr(response, "data") or "playtime" not in response.data:
++                return
++
++            try:
++                playtime = float(response.data["playtime"])
++                self.player._attr_elapsed_time = playtime
++                self.player._attr_elapsed_time_last_updated = time.time()
++            except (ValueError, TypeError):
++                self.logger.debug("Failed to parse playtime from response: %s", response.data)
++
++    def on_speaker_event(self, event: Any = None) -> None:
++        """Handle a state update event broadcast by the speaker.
++
++        :param event: The payload data emitted from the speaker.
++        """
++        # Opportunistically parse playtime from broadcast events (e.g. PausePlaybackEvent)
++        if (
++            event
++            and hasattr(event, "data")
++            and isinstance(event.data, dict)
++            and "playtime" in event.data
++        ):
++            try:
++                playtime = float(event.data["playtime"])
++                self.player._attr_elapsed_time = playtime
++                self.player._attr_elapsed_time_last_updated = time.time()
++            except (ValueError, TypeError):
++                pass
++
++        self.refresh_state(notify_provider=True)
++
++    def refresh_state(self, notify_provider: bool = False) -> None:
++        """Force a re-application of current state to the player object.
++
++        :param notify_provider: Trigger an event signal if true.
++        """
++        if not self.player.connected:
++            return
++
++        speaker_attrs = StateSyncMapper.create_speaker_attributes(self.speaker)
++        group_children = self.player.prov.groups.states.get(self.player.player_id, set())
++
++        queue_id = None
++        if queue := self.mass.player_queues.get(self.player.player_id):
++            queue_id = queue.queue_id
++
++        StateSyncMapper.apply_attributes_to_player(
++            player=self.player,
++            speaker_attrs=speaker_attrs,
++            group_children=group_children,
++            stream_active=self.player.stream_active,
++            queue_id=queue_id,
++        )
++
++        self.player.update_state()
++
++        if notify_provider:
++            self.player.signal_state_update_event()
++            self.player.prov.groups.on_player_state_changed(self.player)
++
++    async def ensure_speaker_connected(self) -> None:
++        """Ensure the speaker is connected, reconnecting if necessary."""
++        async with self.player.connection_lock:
++            if not self.player.connected:
++                await self._reconnect_speaker()
++
++    @staticmethod
++    def suppress_speaker_status_events(speaker: Speaker) -> None:
++        """Patch out the SpeakerStatus event handler to suppress log spam.
++
++        :param speaker: The Speaker instance to patch.
++        """
++
++        def _handle_speaker_status_event(_event: Any) -> bool:
++            return False
++
++        speaker.events.event_SpeakerStatus = _handle_speaker_status_event
++
++    async def _reconnect_speaker(self) -> None:
++        """Swap the internal speaker object and re-establish the connection."""
++        await self.disconnect_speaker()
++
++        new_speaker = Speaker(self.player.ip_address)
++        await new_speaker.connect()
++
++        try:
++            await new_speaker.update()
++
++            attrs = StateSyncMapper.create_speaker_attributes(new_speaker)
++            if not attrs.mac or attrs.mac != self.player.player_id:
++                raise ConnectionError("Reconnected to wrong MAC or failed to get MAC.")
++
++            self.suppress_speaker_status_events(new_speaker)
++            self.player.speaker = new_speaker
++            self._subscribe_speaker_events()
++
++        except Exception:
++            await new_speaker.disconnect()
++            raise
++
++    async def unload(self) -> None:
++        """Handle cleanup when the player is being permanently unloaded."""
++        self.player.prov.groups.unregister_player(self.player)
++        await self.disconnect_speaker()
++
++    async def disconnect_speaker(self) -> None:
++        """Safely disconnect the underlying pywam speaker."""
++        if self.speaker and self.player.connected:
++            await self.speaker.disconnect()
++
++    def _subscribe_speaker_events(self) -> None:
++        """Register the event subscriber for the current speaker instance."""
++        if self.speaker:
++            self.speaker.events.register_subscriber(partial(self.on_speaker_event), info_level=0)
+diff --git a/music_assistant/providers/samsung_wam/features/state_sync/mapper.py b/music_assistant/providers/samsung_wam/features/state_sync/mapper.py
+new file mode 100644
+index 00000000000..fd8901f9194
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/state_sync/mapper.py
+@@ -0,0 +1,118 @@
++"""State synchronization mapper."""
++
++from __future__ import annotations
++
++from typing import TYPE_CHECKING
++
++from music_assistant_models.enums import PlaybackState
++from music_assistant_models.player import PlayerSource
++
++from music_assistant.providers.samsung_wam.features.playback.models import (
++    WamPlaybackState,
++    WamSource,
++)
++
++from .models import WamSpeakerAttributes
++
++if TYPE_CHECKING:
++    from pywam.speaker import Speaker
++
++    from music_assistant.providers.samsung_wam.player import WamPlayer
++
++PLAYBACK_STATE_MAP: dict[WamPlaybackState, PlaybackState] = {
++    WamPlaybackState.PLAY: PlaybackState.PLAYING,
++    WamPlaybackState.PAUSE: PlaybackState.PAUSED,
++    WamPlaybackState.STOP: PlaybackState.IDLE,
++}
++
++PLAYER_SOURCE_MAP = {
++    WamSource.WIFI: PlayerSource(id=WamSource.WIFI, name="Wi-Fi", passive=True),
++    WamSource.BLUETOOTH: PlayerSource(id=WamSource.BLUETOOTH, name="Bluetooth", passive=False),
++    WamSource.AUX: PlayerSource(id=WamSource.AUX, name="AUX", passive=True),
++    WamSource.OPTICAL: PlayerSource(id=WamSource.OPTICAL, name="Optical", passive=True),
++    WamSource.TV_SOUNDCONNECT: PlayerSource(
++        id=WamSource.TV_SOUNDCONNECT, name="TV SoundConnect", passive=False
++    ),
++}
++
++
++class StateSyncMapper:
++    """A stateless utility that maps data between pywam attributes and MA player state."""
++
++    @staticmethod
++    def create_speaker_attributes(wam_speaker: Speaker) -> WamSpeakerAttributes:
++        """Create a type-safe attribute snapshot from the raw pywam object.
++
++        :param wam_speaker: The underlying pywam speaker instance.
++        :return: A WamSpeakerAttributes instance.
++        """
++        raw = wam_speaker.attribute
++        return WamSpeakerAttributes(
++            mac=str(raw.mac or ""),
++            name=str(raw.name or "Unknown"),
++            model=raw.model if isinstance(raw.model, str) else None,
++            software_version=raw.software_version
++            if isinstance(raw.software_version, str)
++            else None,
++            source=raw.source if isinstance(raw.source, str) else None,
++            source_list=list(raw.source_list) if isinstance(raw.source_list, list) else [],
++            group_leader_mac=raw.master_mac if isinstance(raw.master_mac, str) else None,
++            is_group_child=bool(raw.is_slave),
++            volume=int(raw.volume) if isinstance(raw.volume, (int, float)) else None,
++            muted=bool(raw.muted) if isinstance(raw.muted, bool) else None,
++            play_status=raw._playstatus if isinstance(raw._playstatus, str) else None,
++        )
++
++    @staticmethod
++    def apply_attributes_to_player(
++        player: WamPlayer,
++        speaker_attrs: WamSpeakerAttributes,
++        group_children: set[str],
++        stream_active: bool,
++        queue_id: str | None,
++    ) -> None:
++        """Apply a full state update from the validated attributes to the player.
++
++        :param player: The WamPlayer to update.
++        :param speaker_attrs: The current attributes from the speaker.
++        :param group_children: Known group children for this player.
++        :param stream_active: Flag indicating if the stream is active.
++        :param queue_id: The queue identifier if active.
++        """
++        player._attr_available = True
++        player._attr_name = speaker_attrs.name
++
++        if speaker_attrs.volume is not None:
++            player._attr_volume_level = speaker_attrs.volume
++        if speaker_attrs.muted is not None:
++            player._attr_volume_muted = speaker_attrs.muted
++
++        play_status_str = speaker_attrs.play_status or "stop"
++        play_status = WamPlaybackState(play_status_str)
++
++        player._attr_playback_state = PLAYBACK_STATE_MAP.get(play_status, PlaybackState.IDLE)
++
++        if stream_active:
++            player._attr_active_source = queue_id
++        else:
++            player._attr_active_source = speaker_attrs.source
++
++        new_sources: list[PlayerSource] = []
++        for source_name in speaker_attrs.source_list:
++            try:
++                wam_source = WamSource(source_name)
++                if source := PLAYER_SOURCE_MAP.get(wam_source):
++                    new_sources.append(source)
++            except ValueError:
++                continue
++        player._attr_source_list = new_sources
++
++        if speaker_attrs.is_group_child and speaker_attrs.group_leader_mac:
++            player.synced_to_internal = speaker_attrs.group_leader_mac
++            player._attr_group_members = []
++        else:
++            player.synced_to_internal = None
++            if group_children:
++                player._attr_group_members = [player.player_id, *group_children]
++            else:
++                player._attr_group_members = []
+diff --git a/music_assistant/providers/samsung_wam/features/state_sync/models.py b/music_assistant/providers/samsung_wam/features/state_sync/models.py
+new file mode 100644
+index 00000000000..ab367d164c2
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/state_sync/models.py
+@@ -0,0 +1,20 @@
++"""Models specific to state synchronization."""
++
++from dataclasses import dataclass
++
++
++@dataclass(frozen=True, slots=True)
++class WamSpeakerAttributes:
++    """A type-safe, immutable snapshot of the speaker's raw attributes."""
++
++    mac: str
++    name: str
++    model: str | None
++    software_version: str | None
++    source: str | None
++    source_list: list[str]
++    group_leader_mac: str | None
++    is_group_child: bool
++    volume: int | None
++    muted: bool | None
++    play_status: str | None
+diff --git a/music_assistant/providers/samsung_wam/features/volume/__init__.py b/music_assistant/providers/samsung_wam/features/volume/__init__.py
+new file mode 100644
+index 00000000000..411d0f0b5ee
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/volume/__init__.py
+@@ -0,0 +1 @@
++"""Volume feature."""
+diff --git a/music_assistant/providers/samsung_wam/features/volume/handler.py b/music_assistant/providers/samsung_wam/features/volume/handler.py
+new file mode 100644
+index 00000000000..f115b4153aa
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/features/volume/handler.py
+@@ -0,0 +1,31 @@
++"""Volume handler."""
++
++from __future__ import annotations
++
++from music_assistant.providers.samsung_wam.features.base import (
++    WamPlayerFeatureBase,
++    handle_pywam_errors,
++    retry_command,
++)
++
++
++class VolumeHandler(WamPlayerFeatureBase):
++    """Encapsulates volume-related commands."""
++
++    @retry_command()
++    @handle_pywam_errors
++    async def set_volume(self, volume_level: int) -> None:
++        """Set the volume level on the speaker.
++
++        :param volume_level: Volume level (0-100).
++        """
++        await self.speaker.set_volume(volume_level)
++
++    @retry_command()
++    @handle_pywam_errors
++    async def set_mute(self, muted: bool) -> None:
++        """Mute or unmute the speaker.
++
++        :param muted: True to mute, False to unmute.
++        """
++        await self.speaker.set_mute(muted)
+diff --git a/music_assistant/providers/samsung_wam/icon.svg b/music_assistant/providers/samsung_wam/icon.svg
+new file mode 100644
+index 00000000000..8855dc54738
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/icon.svg
+@@ -0,0 +1,20 @@
++<?xml version="1.0" encoding="UTF-8" standalone="no"?>
++<svg
++        width="512"
++        height="512"
++        viewBox="0 0 512 512"
++        version="1.1"
++        xmlns="http://www.w3.org/2000/svg">
++    <path
++            d="M 85,0 H 427 C 473.9,0 512,38.1 512,85 V 427 C 512,473.9 473.9,512 427,512 H 85 C 38.1,512 0,473.9 0,427 V 85 C 0,38.1 38.1,0 85,0 Z"
++            id="background"
++            style="fill:#000000;fill-opacity:1" />
++    <g
++            transform="translate(52.27, 224.8) scale(4.8505)"
++            id="g1"
++            style="fill:#ffffff">
++        <path
++                d="M 3.192,3.4755 C 3.1325,3.234 3.1465,2.9785 3.1815,2.8455 3.262,2.464 3.5245,2.037 4.2805,2.037 c 0.7035,0 1.1165,0.4375 1.1165,1.092 0,0.2205 0,0.742 0,0.742 H 8.393 V 3.0275 C 8.393,0.4165 6.0375,0 4.34,0 2.2085,0 0.4655,0.707 0.1435,2.6705 0.056,3.2095 0.042,3.682 0.168,4.2875 0.6895,6.741 4.956,7.4515 5.5755,9.0055 5.691,9.296 5.656,9.6635 5.6,9.891 5.502,10.2935 5.229,10.703 4.4275,10.703 3.6785,10.703 3.227,10.2655 3.227,9.611 L 3.2235,8.456 H 0 v 0.917 c 0,2.6845 2.107,3.493 4.3645,3.493 2.17,0 3.9515,-0.7385 4.242,-2.7475 C 8.75,9.0825 8.6415,8.407 8.5925,8.1515 8.0885,5.628 3.535,4.879 3.192,3.4755 Z m 39.053,0.028 c -0.0525,-0.238 -0.0385,-0.49 -0.0105,-0.6195 0.0875,-0.385 0.343,-0.805 1.0885,-0.805 0.693,0 1.099,0.434 1.099,1.0815 0,0.2205 0,0.735 0,0.735 h 2.961 V 3.059 c 0,-2.5865 -2.3205,-2.9925 -4.0005,-2.9925 -2.114,0 -3.843,0.6965 -4.158,2.6425 -0.084,0.5285 -0.105,1.001 0.028,1.5995 0.5145,2.429 4.739,3.1325 5.355,4.6655 0.1085,0.2905 0.077,0.6615 0.021,0.8785 -0.091,0.399 -0.3605,0.8015 -1.1585,0.8015 -0.749,0 -1.197,-0.4305 -1.197,-1.078 V 8.4245 h -3.185 v 0.917 c 0,2.653 2.079,3.4545 4.319,3.4545 2.1455,0 3.9165,-0.7315 4.2,-2.7195 C 47.7435,9.051 47.642,8.3825 47.586,8.1305 47.0925,5.642 42.588,4.893 42.245,3.5035 Z m 27.2685,6.545 -2.828,-9.667 H 62.23 V 12.264 h 2.947 l -0.1715,-9.9785 3.038,9.9785 H 72.317 V 0.3815 H 69.349 Z M 12.8555,0.378 10.6295,12.3865 h 3.2445 l 1.6765,-11.116 1.6345,11.116 h 3.22 L 18.1895,0.378 Z m 18.1405,0 -1.5155,9.387 -1.5155,-9.387 h -4.9 l -0.259,12.0085 h 3.003 l 0.0805,-11.116 2.065,11.116 h 3.045 l 2.0685,-11.116 0.0805,11.116 h 3.01 L 35.889,0.378 Z m 27.902,0 H 55.86 v 8.883 c 0.0035,0.154 0,0.329 -0.028,0.455 -0.063,0.2975 -0.315,0.8715 -1.155,0.8715 -0.826,0 -1.085,-0.574 -1.1445,-0.8715 C 53.501,9.59 53.4975,9.415 53.501,9.261 V 0.378 H 50.47 v 8.6065 c -0.0035,0.2205 0.014,0.6755 0.028,0.7945 0.21,2.2435 1.9775,2.9715 4.186,2.9715 2.212,0 3.9795,-0.728 4.193,-2.9715 0.0175,-0.119 0.0385,-0.5705 0.0245,-0.7945 V 0.378 Z m 20.853,5.271 v 1.75 h 1.232 v 1.736 c 0.0035,0.154 -0.0035,0.322 -0.0315,0.455 -0.049,0.3255 -0.357,0.875 -1.232,0.875 -0.868,0 -1.1725,-0.553 -1.225,-0.875 C 78.4735,9.457 78.463,9.289 78.463,9.135 V 3.647 c 0,-0.1925 0.014,-0.406 0.056,-0.567 0.0595,-0.294 0.3185,-0.868 1.1935,-0.868 0.917,0 1.148,0.609 1.2005,0.868 0.035,0.1715 0.035,0.462 0.035,0.462 v 0.665 h 3.024 V 3.8115 c 0,0 0.014,-0.4095 -0.0245,-0.7945 C 83.72,0.763 81.865,0.0525 79.737,0.0525 c -2.1315,0 -3.9515,0.721 -4.214,2.9645 -0.0245,0.2065 -0.0595,0.574 -0.0595,0.7945 v 5.047 c 0,0.2205 0.007,0.3885 0.049,0.791 0.196,2.191 2.0965,2.968 4.221,2.968 2.1385,0 4.0215,-0.777 4.2245,-2.968 0.035,-0.4025 0.0385,-0.5705 0.0455,-0.791 V 5.642 Z"
++                id="path1" />
++    </g>
++</svg>
+diff --git a/music_assistant/providers/samsung_wam/icon_dark.svg b/music_assistant/providers/samsung_wam/icon_dark.svg
+new file mode 100644
+index 00000000000..2188700ee00
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/icon_dark.svg
+@@ -0,0 +1,20 @@
++<?xml version="1.0" encoding="UTF-8" standalone="no"?>
++<svg
++        width="512"
++        height="512"
++        viewBox="0 0 512 512"
++        version="1.1"
++        xmlns="http://www.w3.org/2000/svg">
++    <path
++            d="M 85,0 H 427 C 473.9,0 512,38.1 512,85 V 427 C 512,473.9 473.9,512 427,512 H 85 C 38.1,512 0,473.9 0,427 V 85 C 0,38.1 38.1,0 85,0 Z"
++            id="background"
++            style="fill:#ffffff;fill-opacity:1" />
++    <g
++            transform="translate(52.27, 224.8) scale(4.8505)"
++            id="g1"
++            style="fill:#000000">
++        <path
++                d="M 3.192,3.4755 C 3.1325,3.234 3.1465,2.9785 3.1815,2.8455 3.262,2.464 3.5245,2.037 4.2805,2.037 c 0.7035,0 1.1165,0.4375 1.1165,1.092 0,0.2205 0,0.742 0,0.742 H 8.393 V 3.0275 C 8.393,0.4165 6.0375,0 4.34,0 2.2085,0 0.4655,0.707 0.1435,2.6705 0.056,3.2095 0.042,3.682 0.168,4.2875 0.6895,6.741 4.956,7.4515 5.5755,9.0055 5.691,9.296 5.656,9.6635 5.6,9.891 5.502,10.2935 5.229,10.703 4.4275,10.703 3.6785,10.703 3.227,10.2655 3.227,9.611 L 3.2235,8.456 H 0 v 0.917 c 0,2.6845 2.107,3.493 4.3645,3.493 2.17,0 3.9515,-0.7385 4.242,-2.7475 C 8.75,9.0825 8.6415,8.407 8.5925,8.1515 8.0885,5.628 3.535,4.879 3.192,3.4755 Z m 39.053,0.028 c -0.0525,-0.238 -0.0385,-0.49 -0.0105,-0.6195 0.0875,-0.385 0.343,-0.805 1.0885,-0.805 0.693,0 1.099,0.434 1.099,1.0815 0,0.2205 0,0.735 0,0.735 h 2.961 V 3.059 c 0,-2.5865 -2.3205,-2.9925 -4.0005,-2.9925 -2.114,0 -3.843,0.6965 -4.158,2.6425 -0.084,0.5285 -0.105,1.001 0.028,1.5995 0.5145,2.429 4.739,3.1325 5.355,4.6655 0.1085,0.2905 0.077,0.6615 0.021,0.8785 -0.091,0.399 -0.3605,0.8015 -1.1585,0.8015 -0.749,0 -1.197,-0.4305 -1.197,-1.078 V 8.4245 h -3.185 v 0.917 c 0,2.653 2.079,3.4545 4.319,3.4545 2.1455,0 3.9165,-0.7315 4.2,-2.7195 C 47.7435,9.051 47.642,8.3825 47.586,8.1305 47.0925,5.642 42.588,4.893 42.245,3.5035 Z m 27.2685,6.545 -2.828,-9.667 H 62.23 V 12.264 h 2.947 l -0.1715,-9.9785 3.038,9.9785 H 72.317 V 0.3815 H 69.349 Z M 12.8555,0.378 10.6295,12.3865 h 3.2445 l 1.6765,-11.116 1.6345,11.116 h 3.22 L 18.1895,0.378 Z m 18.1405,0 -1.5155,9.387 -1.5155,-9.387 h -4.9 l -0.259,12.0085 h 3.003 l 0.0805,-11.116 2.065,11.116 h 3.045 l 2.0685,-11.116 0.0805,11.116 h 3.01 L 35.889,0.378 Z m 27.902,0 H 55.86 v 8.883 c 0.0035,0.154 0,0.329 -0.028,0.455 -0.063,0.2975 -0.315,0.8715 -1.155,0.8715 -0.826,0 -1.085,-0.574 -1.1445,-0.8715 C 53.501,9.59 53.4975,9.415 53.501,9.261 V 0.378 H 50.47 v 8.6065 c -0.0035,0.2205 0.014,0.6755 0.028,0.7945 0.21,2.2435 1.9775,2.9715 4.186,2.9715 2.212,0 3.9795,-0.728 4.193,-2.9715 0.0175,-0.119 0.0385,-0.5705 0.0245,-0.7945 V 0.378 Z m 20.853,5.271 v 1.75 h 1.232 v 1.736 c 0.0035,0.154 -0.0035,0.322 -0.0315,0.455 -0.049,0.3255 -0.357,0.875 -1.232,0.875 -0.868,0 -1.1725,-0.553 -1.225,-0.875 C 78.4735,9.457 78.463,9.289 78.463,9.135 V 3.647 c 0,-0.1925 0.014,-0.406 0.056,-0.567 0.0595,-0.294 0.3185,-0.868 1.1935,-0.868 0.917,0 1.148,0.609 1.2005,0.868 0.035,0.1715 0.035,0.462 0.035,0.462 v 0.665 h 3.024 V 3.8115 c 0,0 0.014,-0.4095 -0.0245,-0.7945 C 83.72,0.763 81.865,0.0525 79.737,0.0525 c -2.1315,0 -3.9515,0.721 -4.214,2.9645 -0.0245,0.2065 -0.0595,0.574 -0.0595,0.7945 v 5.047 c 0,0.2205 0.007,0.3885 0.049,0.791 0.196,2.191 2.0965,2.968 4.221,2.968 2.1385,0 4.0215,-0.777 4.2245,-2.968 0.035,-0.4025 0.0385,-0.5705 0.0455,-0.791 V 5.642 Z"
++                id="path1" />
++    </g>
++</svg>
+diff --git a/music_assistant/providers/samsung_wam/icon_monochrome.svg b/music_assistant/providers/samsung_wam/icon_monochrome.svg
+new file mode 100644
+index 00000000000..691a18cad4f
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/icon_monochrome.svg
+@@ -0,0 +1,16 @@
++<?xml version="1.0" encoding="UTF-8" standalone="no"?>
++<svg
++        width="512"
++        height="512"
++        viewBox="0 0 512 512"
++        version="1.1"
++        xmlns="http://www.w3.org/2000/svg">
++    <g
++            transform="translate(52.27, 224.8) scale(4.8505)"
++            id="g1"
++            style="fill:#ffffff">
++        <path
++                d="M 3.192,3.4755 C 3.1325,3.234 3.1465,2.9785 3.1815,2.8455 3.262,2.464 3.5245,2.037 4.2805,2.037 c 0.7035,0 1.1165,0.4375 1.1165,1.092 0,0.2205 0,0.742 0,0.742 H 8.393 V 3.0275 C 8.393,0.4165 6.0375,0 4.34,0 2.2085,0 0.4655,0.707 0.1435,2.6705 0.056,3.2095 0.042,3.682 0.168,4.2875 0.6895,6.741 4.956,7.4515 5.5755,9.0055 5.691,9.296 5.656,9.6635 5.6,9.891 5.502,10.2935 5.229,10.703 4.4275,10.703 3.6785,10.703 3.227,10.2655 3.227,9.611 L 3.2235,8.456 H 0 v 0.917 c 0,2.6845 2.107,3.493 4.3645,3.493 2.17,0 3.9515,-0.7385 4.242,-2.7475 C 8.75,9.0825 8.6415,8.407 8.5925,8.1515 8.0885,5.628 3.535,4.879 3.192,3.4755 Z m 39.053,0.028 c -0.0525,-0.238 -0.0385,-0.49 -0.0105,-0.6195 0.0875,-0.385 0.343,-0.805 1.0885,-0.805 0.693,0 1.099,0.434 1.099,1.0815 0,0.2205 0,0.735 0,0.735 h 2.961 V 3.059 c 0,-2.5865 -2.3205,-2.9925 -4.0005,-2.9925 -2.114,0 -3.843,0.6965 -4.158,2.6425 -0.084,0.5285 -0.105,1.001 0.028,1.5995 0.5145,2.429 4.739,3.1325 5.355,4.6655 0.1085,0.2905 0.077,0.6615 0.021,0.8785 -0.091,0.399 -0.3605,0.8015 -1.1585,0.8015 -0.749,0 -1.197,-0.4305 -1.197,-1.078 V 8.4245 h -3.185 v 0.917 c 0,2.653 2.079,3.4545 4.319,3.4545 2.1455,0 3.9165,-0.7315 4.2,-2.7195 C 47.7435,9.051 47.642,8.3825 47.586,8.1305 47.0925,5.642 42.588,4.893 42.245,3.5035 Z m 27.2685,6.545 -2.828,-9.667 H 62.23 V 12.264 h 2.947 l -0.1715,-9.9785 3.038,9.9785 H 72.317 V 0.3815 H 69.349 Z M 12.8555,0.378 10.6295,12.3865 h 3.2445 l 1.6765,-11.116 1.6345,11.116 h 3.22 L 18.1895,0.378 Z m 18.1405,0 -1.5155,9.387 -1.5155,-9.387 h -4.9 l -0.259,12.0085 h 3.003 l 0.0805,-11.116 2.065,11.116 h 3.045 l 2.0685,-11.116 0.0805,11.116 h 3.01 L 35.889,0.378 Z m 27.902,0 H 55.86 v 8.883 c 0.0035,0.154 0,0.329 -0.028,0.455 -0.063,0.2975 -0.315,0.8715 -1.155,0.8715 -0.826,0 -1.085,-0.574 -1.1445,-0.8715 C 53.501,9.59 53.4975,9.415 53.501,9.261 V 0.378 H 50.47 v 8.6065 c -0.0035,0.2205 0.014,0.6755 0.028,0.7945 0.21,2.2435 1.9775,2.9715 4.186,2.9715 2.212,0 3.9795,-0.728 4.193,-2.9715 0.0175,-0.119 0.0385,-0.5705 0.0245,-0.7945 V 0.378 Z m 20.853,5.271 v 1.75 h 1.232 v 1.736 c 0.0035,0.154 -0.0035,0.322 -0.0315,0.455 -0.049,0.3255 -0.357,0.875 -1.232,0.875 -0.868,0 -1.1725,-0.553 -1.225,-0.875 C 78.4735,9.457 78.463,9.289 78.463,9.135 V 3.647 c 0,-0.1925 0.014,-0.406 0.056,-0.567 0.0595,-0.294 0.3185,-0.868 1.1935,-0.868 0.917,0 1.148,0.609 1.2005,0.868 0.035,0.1715 0.035,0.462 0.035,0.462 v 0.665 h 3.024 V 3.8115 c 0,0 0.014,-0.4095 -0.0245,-0.7945 C 83.72,0.763 81.865,0.0525 79.737,0.0525 c -2.1315,0 -3.9515,0.721 -4.214,2.9645 -0.0245,0.2065 -0.0595,0.574 -0.0595,0.7945 v 5.047 c 0,0.2205 0.007,0.3885 0.049,0.791 0.196,2.191 2.0965,2.968 4.221,2.968 2.1385,0 4.0215,-0.777 4.2245,-2.968 0.035,-0.4025 0.0385,-0.5705 0.0455,-0.791 V 5.642 Z"
++                id="path1" />
++    </g>
++</svg>
+diff --git a/music_assistant/providers/samsung_wam/manifest.json b/music_assistant/providers/samsung_wam/manifest.json
+new file mode 100644
+index 00000000000..f2dd6fd7a2f
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/manifest.json
+@@ -0,0 +1,13 @@
++{
++  "type": "player",
++  "domain": "samsung_wam",
++  "name": "Samsung Wireless Audio (WAM)",
++  "description": "Support for Samsung's Wireless Audio Multiroom (WAM) speakers.",
++  "codeowners": ["@oliver-stevens"],
++  "requirements": [
++    "pywam==0.1.0rc6",
++    "async-upnp-client==0.46.2"
++  ],
++  "documentation": "URL_TO_DOCUMENTATION",
++  "multi_instance": false
++}
+diff --git a/music_assistant/providers/samsung_wam/player.py b/music_assistant/providers/samsung_wam/player.py
+new file mode 100644
+index 00000000000..3714aa2974d
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/player.py
+@@ -0,0 +1,220 @@
++"""Samsung WAM player."""
++
++from __future__ import annotations
++
++import asyncio
++from collections.abc import Callable
++from typing import TYPE_CHECKING, Any
++
++from music_assistant_models.enums import IdentifierType
++from music_assistant_models.player import DeviceInfo, PlayerMedia
++
++from music_assistant.helpers.util import is_valid_mac_address
++from music_assistant.models.player import Player
++
++from .consts import (
++    CONF_ENTRY_HTTP_PROFILE_WAM,
++    CONF_ENTRY_SAMPLE_RATES_WAM,
++    MANUFACTURER_NAME,
++    PLAYER_FEATURES_BASE,
++)
++from .features.device_config.handler import DeviceConfigHandler
++from .features.grouping.handler import GroupingHandler
++from .features.playback.handler import PlaybackHandler
++from .features.state_sync.consts import POLL_INTERVAL
++from .features.state_sync.handler import StateSyncHandler
++from .features.volume.handler import VolumeHandler
++
++if TYPE_CHECKING:
++    from music_assistant_models.config_entries import ConfigEntry
++    from pywam.speaker import Speaker
++
++    from .provider import SamsungWamProvider
++
++
++class WamPlayer(Player):
++    """Representation of a Samsung WAM speaker."""
++
++    def __init__(
++        self,
++        prov: SamsungWamProvider,
++        ip_address: str,
++        udn: str,
++        mac: str,
++        speaker: Speaker,
++    ) -> None:
++        """Initialize the WamPlayer and wire up feature handlers.
++
++        :param prov: The SamsungWamProvider instance managing this player.
++        :param ip_address: The IP address of the speaker.
++        :param udn: The Universal Device Name of the speaker.
++        :param mac: The MAC address of the speaker.
++        :param speaker: The underlying pywam Speaker instance.
++        """
++        self.prov = prov
++        self._ip_address = ip_address
++        self._udn = udn
++        self.speaker = speaker
++
++        self.stream_active = False
++        self._state_update_event = asyncio.Event()
++        self.connection_lock = asyncio.Lock()
++        self.synced_to_internal: str | None = None
++
++        super().__init__(provider=prov, player_id=mac)
++
++        self.logger = self.prov.logger.getChild(self.player_id)
++        self._attr_supported_features = set(PLAYER_FEATURES_BASE)
++        self._attr_can_group_with = {prov.instance_id}
++        self._attr_needs_poll = True
++        self._attr_poll_interval = POLL_INTERVAL
++
++        self._attr_device_info = DeviceInfo(model="Unknown Model", manufacturer=MANUFACTURER_NAME)
++        if is_valid_mac_address(self.player_id):
++            self._attr_device_info.add_identifier(IdentifierType.MAC_ADDRESS, self.player_id)
++        self._attr_device_info.add_identifier(IdentifierType.IP_ADDRESS, self.ip_address)
++
++        # Wire up feature handlers
++        self.state_sync = StateSyncHandler(self)
++        self.playback = PlaybackHandler(self)
++        self.grouping = GroupingHandler(self)
++        self.volume = VolumeHandler(self)
++        self.device_config = DeviceConfigHandler(self)
++
++    # --- Properties ---
++
++    @property
++    def requires_flow_mode(self) -> bool:
++        """Force flow mode for WAM as native gapless queueing is unsupported."""
++        return True
++
++    @property
++    def ip_address(self) -> str:
++        """Return the IP address of the speaker."""
++        return self._ip_address
++
++    @property
++    def udn(self) -> str:
++        """Return the Universal Device Name (UDN) of the speaker."""
++        return self._udn
++
++    @property
++    def connected(self) -> bool:
++        """Return True if the underlying speaker client is connected."""
++        return bool(self.speaker.is_connected)
++
++    @property
++    def synced_to(self) -> str | None:
++        """Return the id of the player this player is synced to (sync leader)."""
++        return self.synced_to_internal
++
++    @property
++    def log_name(self) -> str:
++        """Return a friendly name for logging output."""
++        return self.display_name or self.ip_address
++
++    # --- Configuration ---
++
++    async def get_config_entries(
++        self, action: str | None = None, values: dict[str, Any] | None = None
++    ) -> list[ConfigEntry]:
++        """Return player-specific configuration entries.
++
++        :param action: Action trigger from config UI.
++        :param values: The current configuration values.
++        :return: A list of ConfigEntry objects.
++        """
++        return [CONF_ENTRY_SAMPLE_RATES_WAM, CONF_ENTRY_HTTP_PROFILE_WAM]
++
++    async def on_config_updated(self) -> None:
++        """Handle logic when the player config changes."""
++        if new_name := self.config.name:
++            if self.connected:
++                self.mass.create_task(self.device_config.set_name(new_name))
++
++    # --- Player Controls ---
++
++    async def poll(self) -> None:
++        """Poll the player."""
++        await self.state_sync.poll()
++
++    async def on_unload(self) -> None:
++        """Handle cleanup when player is removed."""
++        await super().on_unload()
++        await self.state_sync.unload()
++
++    async def play(self) -> None:
++        """Send play command to player."""
++        await self.playback.play()
++
++    async def pause(self) -> None:
++        """Send pause command to player."""
++        await self.playback.pause()
++
++    async def stop(self) -> None:
++        """Send stop command to player."""
++        await self.playback.stop()
++
++    async def play_media(self, media: PlayerMedia) -> None:
++        """Play media.
++
++        :param media: The media item to play.
++        """
++        await self.playback.play_media(media)
++
++    async def select_source(self, source: str) -> None:
++        """Select source.
++
++        :param source: The source identifier to select.
++        """
++        await self.playback.select_source(source)
++
++    async def volume_set(self, volume_level: int) -> None:
++        """Set volume level.
++
++        :param volume_level: The volume level to set.
++        """
++        await self.volume.set_volume(volume_level)
++
++    async def volume_mute(self, muted: bool) -> None:
++        """Set mute state.
++
++        :param muted: True to mute, False to unmute.
++        """
++        await self.volume.set_mute(muted)
++
++    async def set_members(
++        self,
++        player_ids_to_add: list[str] | None = None,
++        player_ids_to_remove: list[str] | None = None,
++    ) -> None:
++        """Handle group membership changes.
++
++        :param player_ids_to_add: List of player IDs to add to the group.
++        :param player_ids_to_remove: List of player IDs to remove from the group.
++        """
++        await self.prov.groups.set_members(
++            self.player_id,
++            player_ids_to_add,
++            player_ids_to_remove,
++        )
++
++    # --- Helpers ---
++
++    def signal_state_update_event(self) -> None:
++        """Signal internal event that state has been updated (for waiters)."""
++        self._state_update_event.set()
++
++    async def await_state_change(self, check: Callable[[], bool], timeout: float) -> None:
++        """Wait for a specific condition in the state.
++
++        :param check: A callable returning a boolean indicating if the condition is met.
++        :param timeout: Maximum time in seconds to wait.
++        """
++        try:
++            async with asyncio.timeout(timeout):
++                while not check():
++                    self._state_update_event.clear()
++                    await self._state_update_event.wait()
++        except TimeoutError:
++            pass
+diff --git a/music_assistant/providers/samsung_wam/provider.py b/music_assistant/providers/samsung_wam/provider.py
+new file mode 100644
+index 00000000000..8eb9271b4bf
+--- /dev/null
++++ b/music_assistant/providers/samsung_wam/provider.py
+@@ -0,0 +1,77 @@
++"""Samsung WAM player provider."""
++
++from __future__ import annotations
++
++from typing import TYPE_CHECKING, Any
++
++from music_assistant_models.enums import ProviderFeature
++from pywam.device import SPEAKER_MODELS
++
++from music_assistant.constants import CONF_ENTRY_MANUAL_DISCOVERY_IPS
++from music_assistant.models.player_provider import PlayerProvider
++
++from .features.discovery.handler import DiscoveryHandler
++from .features.grouping.coordinator import GroupingCoordinator
++
++if TYPE_CHECKING:
++    from music_assistant_models.config_entries import ConfigEntry, ConfigValueType
++
++    from music_assistant.mass import MusicAssistant
++
++    from .player import WamPlayer
++
++
++class SamsungWamProvider(PlayerProvider):
++    """Samsung WAM player provider."""
++
++    supported_models: dict[str, dict[str, Any]]
++    wam_players: dict[str, WamPlayer]
++    groups: GroupingCoordinator
++    discovery: DiscoveryHandler
++
++    @property
++    def supported_features(self) -> set[ProviderFeature]:
++        """Return the features supported by this Provider."""
++        return {ProviderFeature.SYNC_PLAYERS}
++
++    async def handle_async_init(self) -> None:
++        """Handle async initialization of the provider and its feature handlers."""
++        self.supported_models = SPEAKER_MODELS
++        self.wam_players = {}
++
++        # Wire up provider-level feature handlers
++        self.groups = GroupingCoordinator(self)
++        self.discovery = DiscoveryHandler(self)
++
++    async def loaded_in_mass(self) -> None:
++        """Call after the provider has been loaded and is ready to start."""
++        await self.discovery.start()
++        self.groups.start_sync_task()
++
++    async def unload(self, is_removed: bool = False) -> None:
++        """Handle close/cleanup of the provider.
++
++        :param is_removed: True if the provider is being permanently removed.
++        """
++        await self.discovery.stop()
++        self.groups.stop_sync_task()
++        self.wam_players.clear()
++        self.groups.states.clear()
++
++
++async def get_config_entries(
++    mass: MusicAssistant,
++    instance_id: str | None = None,
++    action: str | None = None,
++    values: dict[str, ConfigValueType] | None = None,
++) -> tuple[ConfigEntry, ...]:
++    """Return all config entries for this provider.
++
++    :param mass: The MusicAssistant instance.
++    :param instance_id: The ID of the provider instance.
++    :param action: Action trigger from config UI.
++    :param values: The current configuration values.
++    :return: A tuple of ConfigEntry objects.
++    """
++    # ruff: noqa: ARG001
++    return (CONF_ENTRY_MANUAL_DISCOVERY_IPS,)
+diff --git a/requirements_all.txt b/requirements_all.txt
+index fec509c3397..6d9dedabbed 100644
+--- a/requirements_all.txt
++++ b/requirements_all.txt
+@@ -63,6 +63,7 @@ pylast==7.0.2
+ python-fullykiosk==0.0.14
+ python-slugify==8.0.4
+ pytz==2025.2
++pywam==0.1.0rc6
+ pywidevine==1.9.0
+ radios==0.3.2
+ rokuecp==0.19.5

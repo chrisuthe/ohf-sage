@@ -1,0 +1,336 @@
+[
+  {
+    "idx": 0,
+    "config": "c0",
+    "pr": 10,
+    "repo": "music-assistant/server",
+    "src_pr": 3334,
+    "author": "MarvinSchenkel",
+    "ground_truth": "I don't think we need all those `getattr`s here? Looks like `synced_to_internal` is a property anyway.",
+    "path": "music_assistant/providers/samsung_wam/features/grouping/coordinator.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis PR introduces a new **Samsung Wireless Audio (WAM)** player provider integration for Music Assistant, including discovery, state syncing, playback control, and grouping support, and adds the required dependency (`pywam`). The PR metadata/description currently frames this as a benchmark repro \u201csafe to close\u201d, which does not align with the functional scope of the changes.\n\n**Changes:**\n- Added a new `samsung_wam` player provider (provider, player model, discovery, state sync, playback, grouping, device config, volume handlers).\n- Added provider metadata/assets (manifest + icons).\n- Added `pywam` to the global requirements set.\n\n### Reviewed changes\n\nCopilot reviewed 31 out of 34 changed files in this pull request and generated 4 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| requirements_all.txt | Adds `pywam` to the all-deps requirements list. |\r\n| music_assistant/providers/samsung_wam/__init__.py | Provider entrypoint setup and dependency log filtering/config. |\r\n| music_assistant/providers/samsung_wam/consts.py | Provider constants and config-entry defaults/features. |\r\n| music_assistant/providers/samsung_wam/exceptions.py | Provider-specific exception type(s). |\r\n| music_assistant/providers/samsung_wam/manifest.json | Declares provider metadata and runtime requirements. |\r\n| music_assistant/providers/samsung_wam/icon.svg | Provider icon asset. |\r\n| music_assistant/providers/samsung_wam/icon_dark.svg | Provider dark-theme icon asset. |\r\n| music_assistant/providers/samsung_wam/icon_monochrome.svg | Provider monochrome icon asset. |\r\n| music_assistant/providers/samsung_wam/player.py | Player implementation wiring feature handlers and MA player methods. |\r\n| music_assistant/providers/samsung_wam/provider.py | Provider implementation and provider-level lifecycle hooks/config entries. |\r\n| music_assistant/providers/samsung_wam/features/__init__.py | Feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/base.py | Shared feature base classes + retry/error translation decorators. |\r\n| music_assistant/providers/samsung_wam/features/device_config/__init__.py | Device-config feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/device_config/handler.py | Device configuration commands (e.g., rename). |\r\n| music_assistant/providers/samsung_wam/features/discovery/__init__.py | Discovery feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/discovery/consts.py | Discovery constants (ports, SSDP ST, probe timing). |\r\n| music_assistant/providers/samsung_wam/features/discovery/handler.py | Coordinates SSDP + manual probing + player setup. |\r\n| music_assistant/providers/samsung_wam/features/discovery/models.py | Discovery event and probe result models. |\r\n| music_assistant/providers/samsung_wam/features/discovery/ssdp_listener.py | SSDP listener wrapper and callback mapping. |\r\n| music_assistant/providers/samsung_wam/features/grouping/__init__.py | Grouping feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/grouping/consts.py | Grouping constants (sync debounce/task id). |\r\n| music_assistant/providers/samsung_wam/features/grouping/coordinator.py | Provider-wide grouping state tracking and command coordination. |\r\n| music_assistant/providers/samsung_wam/features/grouping/handler.py | Speaker grouping command primitives. |\r\n| music_assistant/providers/samsung_wam/features/playback/__init__.py | Playback feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/playback/consts.py | Playback constants (timeouts). |\r\n| music_assistant/providers/samsung_wam/features/playback/handler.py | Playback commands including play/pause/stop/media/source selection. |\r\n| music_assistant/providers/samsung_wam/features/playback/models.py | Playback/source enums for mapping. |\r\n| music_assistant/providers/samsung_wam/features/state_sync/__init__.py | State-sync feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/state_sync/consts.py | State-sync constants (polling, health checks). |\r\n| music_assistant/providers/samsung_wam/features/state_sync/handler.py | Polling, event handling, reconnection, and health checks. |\r\n| music_assistant/providers/samsung_wam/features/state_sync/mapper.py | Maps pywam attributes to MA player state fields. |\r\n| music_assistant/providers/samsung_wam/features/state_sync/models.py | Strongly typed snapshot model for speaker attributes. |\r\n| music_assistant/providers/samsung_wam/features/volume/__init__.py | Volume feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/volume/handler.py | Volume/mute commands. |\n</details>\n\n\n\n\n\n\n",
+      "comments": [
+        {
+          "path": "music_assistant/providers/samsung_wam/provider.py",
+          "line": 60,
+          "body": "`unload()` clears `self.groups.states` but leaves the coordinator\u2019s reverse lookup map populated, which can leave stale grouping state around if the provider instance is reused and makes the internal state inconsistent."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/manifest.json",
+          "line": 12,
+          "body": "The manifest still contains the placeholder `URL_TO_DOCUMENTATION`, which is inconsistent with other provider manifests and will surface as a broken/invalid docs link."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/features/state_sync/mapper.py",
+          "line": 93,
+          "body": "`WamPlaybackState(play_status_str)` will raise `ValueError` if pywam reports an unexpected play status string, which can break state refresh/polling and incorrectly drop the player offline."
+        },
+        {
+          "path": "requirements_all.txt",
+          "line": 66,
+          "body": "The PR description says this is a benchmark repro and is \u201csafe to close\u201d, but this change adds a new runtime dependency (`pywam`) and a full new provider implementation; either the description should be updated or these functional changes should be moved to a separate PR."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 0,
+    "config": "c1",
+    "pr": 11,
+    "repo": "music-assistant/server",
+    "src_pr": 3334,
+    "author": "MarvinSchenkel",
+    "ground_truth": "I don't think we need all those `getattr`s here? Looks like `synced_to_internal` is a property anyway.",
+    "path": "music_assistant/providers/samsung_wam/features/grouping/coordinator.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Not ready to approve\n\nIt introduces a new provider but includes multiple correctness/maintainability blockers (queue active-source mismatch, swallowed timeout/errors, and a placeholder manifest documentation URL) that should be addressed before merging.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n*This review doesn't count toward merge requirements. [Sign up for the private preview](https://forms.cloud.microsoft/r/zLCqnkB1FJ) to control whether Copilot approvals count.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR adds a new **Samsung Wireless Audio (WAM)** player provider implementation to Music Assistant (discovery, state sync, playback control, and grouping), and introduces its required dependency/version pinning.\n\n**Changes:**\n- Added `samsung_wam` player provider with modular feature handlers (discovery, playback, grouping, volume, state sync).\n- Pinned and surfaced the new dependency (`pywam==0.1.0rc6`) for the provider.\n- Added OHF Sage review skill documentation under `.github/skills/ohf-sage/`.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| requirements_all.txt | Adds `pywam` to the consolidated requirements list. |\r\n| music_assistant/providers/samsung_wam/__init__.py | Provider setup/entrypoint and logging filters for pywam chatter. |\r\n| music_assistant/providers/samsung_wam/consts.py | Provider constants, base player feature set, and config entry defaults. |\r\n| music_assistant/providers/samsung_wam/exceptions.py | Defines provider-specific exception(s). |\r\n| music_assistant/providers/samsung_wam/manifest.json | Declares provider metadata, requirements, and documentation link. |\r\n| music_assistant/providers/samsung_wam/provider.py | Implements the `SamsungWamProvider` and provider-level lifecycle wiring. |\r\n| music_assistant/providers/samsung_wam/player.py | Implements `WamPlayer` and wires per-player feature handlers. |\r\n| music_assistant/providers/samsung_wam/icon.svg | Adds provider icon asset. |\r\n| music_assistant/providers/samsung_wam/icon_dark.svg | Adds dark-mode provider icon asset. |\r\n| music_assistant/providers/samsung_wam/icon_monochrome.svg | Adds monochrome provider icon asset. |\r\n| music_assistant/providers/samsung_wam/features/__init__.py | Feature package marker for the provider. |\r\n| music_assistant/providers/samsung_wam/features/base.py | Adds base classes and retry/error-translation decorators for feature handlers. |\r\n| music_assistant/providers/samsung_wam/features/device_config/__init__.py | Device-config feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/device_config/handler.py | Implements device configuration operations (e.g., renaming). |\r\n| music_assistant/providers/samsung_wam/features/discovery/__init__.py | Discovery feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/discovery/consts.py | Discovery constants (SSDP target, probe endpoints/timeouts). |\r\n| music_assistant/providers/samsung_wam/features/discovery/models.py | Discovery models for events and probe results. |\r\n| music_assistant/providers/samsung_wam/features/discovery/ssdp_listener.py | SSDP listener wrapper for discovery events. |\r\n| music_assistant/providers/samsung_wam/features/discovery/handler.py | Discovery orchestration, probing, and player setup/registration. |\r\n| music_assistant/providers/samsung_wam/features/grouping/__init__.py | Grouping feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/grouping/consts.py | Grouping constants (debounce/task id). |\r\n| music_assistant/providers/samsung_wam/features/grouping/coordinator.py | Provider-level coordinator for group membership state and commands. |\r\n| music_assistant/providers/samsung_wam/features/grouping/handler.py | Per-player grouping command implementation (form/leave group). |\r\n| music_assistant/providers/samsung_wam/features/playback/__init__.py | Playback feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/playback/consts.py | Playback constants (timeouts). |\r\n| music_assistant/providers/samsung_wam/features/playback/models.py | Playback/source enums used by the provider. |\r\n| music_assistant/providers/samsung_wam/features/playback/handler.py | Per-player playback operations (play/pause/stop, play URL, source select). |\r\n| music_assistant/providers/samsung_wam/features/state_sync/__init__.py | State-sync feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/state_sync/consts.py | State-sync constants (poll interval, health-check timeout). |\r\n| music_assistant/providers/samsung_wam/features/state_sync/models.py | Typed snapshot model for speaker attributes. |\r\n| music_assistant/providers/samsung_wam/features/state_sync/mapper.py | Maps pywam speaker state into MA player state. |\r\n| music_assistant/providers/samsung_wam/features/state_sync/handler.py | Polling, health checks, event subscription, reconnect logic, and state refresh. |\r\n| music_assistant/providers/samsung_wam/features/volume/__init__.py | Volume feature package marker. |\r\n| music_assistant/providers/samsung_wam/features/volume/handler.py | Per-player volume/mute command implementation. |\r\n| .github/skills/ohf-sage/SKILL.md | Adds OHF Sage skill description/metadata. |\r\n| .github/skills/ohf-sage/principles.md | Adds the cited engineering principles reference used by OHF Sage. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 33/36 changed files\n- **Comments generated:** 6\n- **Review effort level:** Lite\n</details>\n\nWe're testing this review assessment. Please use \ud83d\udc4d or \ud83d\udc4e to tell us if it's correct.",
+      "comments": [
+        {
+          "path": "music_assistant/providers/samsung_wam/features/state_sync/handler.py",
+          "line": 161,
+          "body": "When a queue exists you set active_source to queue.queue_id, but MA convention for \u201cMA queue active\u201d is to use player_id (see music_assistant/models/player.py:1955-1961); this makes queue resume logic in PlaybackHandler.play() skip the queue path."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/provider.py",
+          "line": 3,
+          "body": "The PR description says this is only a benchmark repro/safe-to-close, but this change set adds a new Samsung WAM player provider and dependencies, which makes the PR scope and intent unclear (project principle: keep PRs single-purpose; see https://github.com/music-assistant/server/pull/2911#discussion_r2751214136). Please either update the PR title/description to match the actual change, or split the provider work into its own PR."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/manifest.json",
+          "line": 12,
+          "body": "The provider manifest still contains the placeholder documentation URL, which will produce a broken documentation link (and may fail manifest validation); please replace it with the real docs URL (compare e.g. _demo_player_provider/manifest.json)."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/features/discovery/handler.py",
+          "line": 168,
+          "body": "Catching Exception here logs and then silently continues, which can hide real bugs and violates the project\u2019s guidance to avoid broad exceptions and swallowed errors (e.g. https://github.com/music-assistant/server/pull/3096#discussion_r2768368356 and https://github.com/music-assistant/server/pull/1214#discussion_r1557137671). Consider re-raising after logging (or narrowing the exception types)."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/features/state_sync/mapper.py",
+          "line": 65,
+          "body": "This PR introduces a new player provider with substantial behavior (discovery, grouping, playback, state sync) but adds no tests; there are existing provider tests under tests/providers/ (e.g. tests/providers/airplay/test_player.py), so adding at least a small unit/integration test surface for the mapping and discovery parsing would help prevent regressions."
+        },
+        {
+          "path": "music_assistant/providers/samsung_wam/player.py",
+          "line": 220,
+          "body": "await_state_change() swallows TimeoutError, so select_source() can return \u201csuccess\u201d even when the source never changed (and it also prevents retry_command() from retrying on timeouts). Let the TimeoutError propagate so retries/failures work as intended."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 2,
+    "config": "c0",
+    "pr": 12,
+    "repo": "music-assistant/server",
+    "src_pr": 3776,
+    "author": "MarvinSchenkel",
+    "ground_truth": "Both MIN and MAX output buffer duration seem unused now after we dropped the config. We can remove the constants",
+    "path": "music_assistant/providers/airplay/constants.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nAdds instrumentation and configuration around AirPlay2 session establishment timing to help troubleshoot/mitigate fragile startup/sync behavior when using the `cliap2` binary.\n\n**Changes:**\n- Introduces session-establishment timing measurement and recommended latency window logic for AirPlay2 streams.\n- Adds a new advanced config value for \u201csession establishment latency\u201d and passes it to `cliap2`.\n- Cleans up/adjusts `cliap2` stderr log routing (stripping duplicate prefixes) and connection-state detection.\n\n### Reviewed changes\n\nCopilot reviewed 4 out of 8 changed files in this pull request and generated 2 comments.\n\n| File | Description |\n| ---- | ----------- |\n| music_assistant/providers/airplay/protocols/airplay2.py | Adds session timing measurement, warning logic, stderr parsing tweaks, and a new CLI arg for session-establishment latency. |\n| music_assistant/providers/airplay/protocols/_protocol.py | Adds timestamps to track CLI start vs. session connection time. |\n| music_assistant/providers/airplay/player.py | Adds a new advanced config entry for session-establishment latency and adjusts wait-start calculation. |\n| music_assistant/providers/airplay/constants.py | Introduces constants/limits/defaults for session-establishment latency and a default session delay. |\n\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (2)</summary>\n\n**music_assistant/providers/airplay/protocols/airplay2.py:106**\n* [CRITICAL] `_session_established` can raise an `AssertionError` if `_cli_start_ts` was never set (it\u2019s only assigned when a specific stderr line is seen), and it also uses a bare string literal as an in-block comment.\n```\n        if self._connected_ts is not None:\n            \"\"\"We have previously connected, so we ignore this call\"\"\"\n            return\n        self._connected_ts = time.time()\n        assert self._session_establishment_ms is not None  # for type checker\n```\n**music_assistant/providers/airplay/protocols/airplay2.py:261**\n* [PROBLEM] This branch logs advice to increase \"Milliseconds of data to buffer\" in player advanced settings, but that setting no longer exists (output buffer duration is now fixed), so the guidance is misleading.\n```\n            elif \"put delay detected\" in line:\n```\n</details>\n\n",
+      "comments": [
+        {
+          "path": "music_assistant/providers/airplay/protocols/airplay2.py",
+          "line": 58,
+          "body": "[PROBLEM] The docstring says the recommended window is \u201cno less than 700ms less than\u201d the actual session establishment time, but the implementation uses `high - 600` (and the UI text also states 600ms).\n\nThis issue also appears in the following locations of the same file:\n- line 102\n- line 261"
+        },
+        {
+          "path": "music_assistant/providers/airplay/player.py",
+          "line": 346,
+          "body": "[PROBLEM] The new AirPlay2 warning text claims MA \u201cdoes support audio synchronisation\u201d, but `can_group_with` still returns an empty set for AirPlay2 and the protocol description above explicitly says AirPlay2 does not support audio synchronization/grouping, making the UI messaging contradictory."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 2,
+    "config": "c1",
+    "pr": 13,
+    "repo": "music-assistant/server",
+    "src_pr": 3776,
+    "author": "MarvinSchenkel",
+    "ground_truth": "Both MIN and MAX output buffer duration seem unused now after we dropped the config. We can remove the constants",
+    "path": "music_assistant/providers/airplay/constants.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nAdds AirPlay 2 \u201csession establishment latency\u201d tracking/configuration to help diagnose and mitigate playback sync/connection timing issues (referenced as a repro/benchmark for server#3776), plus introduces the OHF Sage review-skill docs into the repo.\n\n**Changes:**\n- Add timing measurement for AirPlay 2 session establishment and pass a new `--session_establishment_latency` argument to `cliap2`.\n- Introduce a new advanced player config entry for session establishment latency and adjust `wait_start` behavior.\n- Improve `cliap2` stderr logging readability by stripping the leading timestamp/level prefix; add OHF Sage skill documentation files.\n\n### Reviewed changes\n\nCopilot reviewed 6 out of 10 changed files in this pull request and generated 2 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| music_assistant/providers/airplay/protocols/airplay2.py | Adds session-establishment timing logic, passes new CLI arg, and adjusts stderr parsing/log output. |\r\n| music_assistant/providers/airplay/protocols/_protocol.py | Adds timestamps used for session establishment measurement. |\r\n| music_assistant/providers/airplay/player.py | Adds/uses session establishment latency config and adjusts wait-start computation. |\r\n| music_assistant/providers/airplay/constants.py | Adds new constants and config key for session establishment latency and default delay. |\r\n| .github/skills/ohf-sage/SKILL.md | Adds OHF Sage skill metadata and guidance doc. |\r\n| .github/skills/ohf-sage/principles.md | Adds the mined/cited principles reference document used by the skill. |\n</details>\n\n\n\n\n\n\n",
+      "comments": [
+        {
+          "path": "music_assistant/providers/airplay/protocols/airplay2.py",
+          "line": 109,
+          "body": "[CRITICAL] `_session_established()` can raise an `AssertionError` and crash stderr handling if `_cli_start_ts` was never set (or if the expected stderr marker arrives after the connect marker), because `_session_establishment_ms` will be `None`. This makes session establishment tracking depend on fragile log output ordering; guard against missing timing data instead of asserting."
+        },
+        {
+          "path": "music_assistant/providers/airplay/player.py",
+          "line": 321,
+          "body": "[PROBLEM] This config entry guides users to adjust \u201csession establishment latency\u201d, but AirPlay2Stream still logs \u201cRecommended to increase 'Milliseconds of data to buffer' in player advanced settings\u201d, which no longer matches the UI wording/setting and will confuse troubleshooting. Update the log guidance to reference the current setting name/key (or remove it if buffering is no longer configurable)."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 3,
+    "config": "c0",
+    "pr": 14,
+    "repo": "music-assistant/server",
+    "src_pr": 2688,
+    "author": "MarvinSchenkel",
+    "ground_truth": "Does it make sense to have a better fallback instead of `\"\"`? Maybe \"BBC\" or something along those lines?",
+    "path": "music_assistant/providers/bbc_sounds/adaptor.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nUpdates the BBC Sounds provider\u2019s stream metadata generation to produce more user-friendly titles for track-based streams by preferring network/series/container labels (and special-casing \u201cBBC News\u201d) instead of always using the episode description.\n\n**Changes:**\n- Added heuristic title selection for BBC Sounds track streams (network/container/description/titles fallbacks).\n- Simplified `StreamMetadata` construction for track streams to use the computed title.\n\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (1)</summary>\n\n**music_assistant/providers/bbc_sounds/adaptor.py:447**\n* The code now treats `episode.metadata` as potentially absent (line 438), but the image assignment still assumes it is always present (`episode.metadata.images`). If `metadata` is ever `None`, this will raise at runtime; guarding this keeps the logic consistent with the new checks.\n```\n            if episode.metadata.images:\n                metadata.image_url = episode.metadata.images[0].path\n```\n</details>\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-3-c0-base?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.",
+      "comments": [
+        {
+          "path": "music_assistant/providers/bbc_sounds/adaptor.py",
+          "line": 444,
+          "body": "This new title-selection logic directly accesses nested fields like `source_obj.network.id`, `source_obj.network.short_title`, and `source_obj.container.title`. Elsewhere in this adaptor these fields are accessed via `_get_attr` (e.g., `network.short_title` in adaptor.py:307) to tolerate missing/partial API payloads. Using direct attribute access here can raise `AttributeError` at runtime for objects that lack `network`/`container`/`titles` or have unexpected shapes.\n\nConsider switching to `_get_attr` for these nested values and ensure `title` always resolves to a non-empty string (e.g., a safe default like \"BBC\").\n\nThis issue also appears on line 446 of the same file."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 3,
+    "config": "c1",
+    "pr": 15,
+    "repo": "music-assistant/server",
+    "src_pr": 2688,
+    "author": "MarvinSchenkel",
+    "ground_truth": "Does it make sense to have a better fallback instead of `\"\"`? Maybe \"BBC\" or something along those lines?",
+    "path": "music_assistant/providers/bbc_sounds/adaptor.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis PR adjusts BBC Sounds stream metadata generation (specifically, the display title for track streams) and adds a new OHF Sage review-skill documentation bundle under `.github/skills/ohf-sage`.\n\n**Changes:**\n- Improve how the BBC Sounds provider derives a `StreamMetadata.title` for track streams (network/container/title fallbacks).\n- Add OHF Sage skill documentation (`SKILL.md` + cited `principles.md`) for consistent code review guidance.\n\n### Reviewed changes\n\nCopilot reviewed 3 out of 3 changed files in this pull request and generated 2 comments.\n\n| File | Description |\n| ---- | ----------- |\n| `music_assistant/providers/bbc_sounds/adaptor.py` | Refines title selection for BBC Sounds track stream metadata. |\n| `.github/skills/ohf-sage/SKILL.md` | Introduces the OHF Sage review-skill entrypoint/metadata and usage notes. |\n| `.github/skills/ohf-sage/principles.md` | Adds the cited principles corpus used by the OHF Sage review skill. |\n\n\n\n\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-3-c1-base?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.",
+      "comments": [
+        {
+          "path": "music_assistant/providers/bbc_sounds/adaptor.py",
+          "line": 441,
+          "body": "Indexing `source_obj.titles[\"primary\"]` can raise `KeyError` when `titles` is present but missing the `primary` key. Use a safe lookup (consistent with other `.get(...)` usage in this file) to avoid failing stream details creation."
+        },
+        {
+          "path": "music_assistant/providers/bbc_sounds/adaptor.py",
+          "line": 435,
+          "body": "PR description says this is only a benchmark repro and \"safe to close\", but this diff includes a functional change to BBC Sounds stream metadata title selection (and adds new review-skill docs). Consider updating the PR title/description to reflect the actual changes, or splitting benchmark-only work from functional changes into separate PRs to avoid accidental merges/closures."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 9,
+    "config": "c0",
+    "pr": 16,
+    "repo": "music-assistant/server",
+    "src_pr": 3434,
+    "author": "marcelveldt",
+    "ground_truth": "same comment - asserts in the code are there to help the type checker, they dont do anything at runtime (nor should they be needed)",
+    "path": "music_assistant/providers/airplay/protocols/raop.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis PR improves AirPlay/RAOP robustness around pairing detection and stream startup by combining discovery flags across services and making CLI process startup checks fail with explicit exceptions instead of assertions.\n\n**Changes:**\n- Combine RAOP + AirPlay discovery flags when determining whether PIN pairing is required, and extend the AirPlay player tests to cover mixed-service flag combinations.\n- Improve RAOP interface selection for `cliraop -if` by resolving a more specific local source IP (including a route-based fallback when bound to `0.0.0.0`) and guarding against invalid values.\n- Replace `assert`-based invariants in AirPlay2/RAOP protocol startup with explicit runtime/type errors for clearer failure behavior.\n\n### Reviewed changes\n\nCopilot reviewed 5 out of 5 changed files in this pull request and generated no comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| tests/providers/airplay/test_player.py | Adds cases to verify pairing-required flags are combined across RAOP/AirPlay discovery records. |\r\n| music_assistant/providers/airplay/protocols/raop.py | Uses resolved interface IP for `-if` with address-family safety checks and better discovery guards. |\r\n| music_assistant/providers/airplay/protocols/airplay2.py | Replaces asserts with explicit exceptions for missing discovery info and invalid config types. |\r\n| music_assistant/providers/airplay/player.py | ORs discovery flags from both services and adds a fallback to AirPlay 2 when RAOP discovery is missing. |\r\n| music_assistant/providers/airplay/helpers.py | Introduces `resolve_if_ip` to pick an appropriate local bind/interface IP without blocking the event loop. |\n</details>\n\n\n\n\n\n\n",
+      "comments": []
+    }
+  },
+  {
+    "idx": 9,
+    "config": "c1",
+    "pr": 17,
+    "repo": "music-assistant/server",
+    "src_pr": 3434,
+    "author": "marcelveldt",
+    "ground_truth": "same comment - asserts in the code are there to help the type checker, they dont do anything at runtime (nor should they be needed)",
+    "path": "music_assistant/providers/airplay/protocols/raop.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis PR updates the AirPlay provider to better handle discovery-derived pairing flags and RAOP interface binding, and adds internal review-skill documentation under `.github/skills/ohf-sage`.\n\n**Changes:**\n- Combine RAOP + AirPlay discovery flags when determining whether PIN pairing is required.\n- Improve RAOP `-if` selection by resolving a concrete outbound/source IP (including a routing-table fallback).\n- Add `.github/skills/ohf-sage` documentation plus additional AirPlay pairing unit test cases.\n\n### Reviewed changes\n\nCopilot reviewed 7 out of 7 changed files in this pull request and generated 2 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| tests/providers/airplay/test_player.py | Adds parametrized test cases to validate combined (OR-ed) discovery flags behavior. |\r\n| music_assistant/providers/airplay/protocols/raop.py | Uses `resolve_if_ip` to decide whether to pass `-if`, with IPv4/IPv6 family matching. |\r\n| music_assistant/providers/airplay/protocols/airplay2.py | Replaces asserts with explicit runtime/type checks for discovery presence and `sync_adjust`. |\r\n| music_assistant/providers/airplay/player.py | OR-combines discovery flags across RAOP/AirPlay and adds a protocol selection fallback when RAOP isn\u2019t discovered. |\r\n| music_assistant/providers/airplay/helpers.py | Adds `resolve_if_ip` helper to compute a suitable source/interface IP without blocking the event loop. |\r\n| .github/skills/ohf-sage/SKILL.md | Adds OHF Sage review-skill documentation. |\r\n| .github/skills/ohf-sage/principles.md | Adds the cited principles/ruleset referenced by the skill. |\n</details>\n\n\n\n\n\n\n",
+      "comments": [
+        {
+          "path": "music_assistant/providers/airplay/player.py",
+          "line": 298,
+          "body": "`_get_flags` currently suppresses `ValueError`/`TypeError` when parsing the `sf`/`flags` field, which can silently drop anomalous discovery data and make pairing detection incorrect; this violates the \"never silently swallow errors\" principle (see https://github.com/music-assistant/server/pull/1214#discussion_r1557137671 and https://github.com/music-assistant/server/pull/3722#discussion_r3106867386). Consider switching to an explicit `try/except (ValueError, TypeError)` that logs the bad value (at least debug) so these cases are visible while still keeping playback resilient."
+        },
+        {
+          "path": ".github/skills/ohf-sage/SKILL.md",
+          "line": 4,
+          "body": "The PR description says this is only a benchmark repro/safe-to-close, but this change set includes production AirPlay logic changes + tests and also adds new `.github/skills/ohf-sage/*` review guidance files; please update the PR title/description to match or split the unrelated pieces into separate PRs to keep it single-purpose (see https://github.com/music-assistant/server/pull/2911#discussion_r2751214136 and https://github.com/music-assistant/frontend/pull/20#issuecomment-1540353368)."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 10,
+    "config": "c0",
+    "pr": 18,
+    "repo": "music-assistant/server",
+    "src_pr": 1799,
+    "author": "marcelveldt",
+    "ground_truth": "This is always MPEG ? If you are not sure you can use unknown here which instructs ffmpeg to work it out",
+    "path": "music_assistant/providers/ibroadcast/__init__.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis PR introduces a new **iBroadcast music provider** into the Music Assistant server codebase, including its provider manifest/assets and the Python dependency needed to communicate with iBroadcast.\n\n**Changes:**\n- Added `ibroadcastaio==0.3.1` to the global requirements set.\n- Added an `ibroadcast` provider (manifest + icon) and a full provider implementation (`IBroadcastProvider`).\n- Implemented library browsing and basic item parsing (artists/albums/tracks/playlists) and stream URL retrieval.\n\n### Reviewed changes\n\nCopilot reviewed 3 out of 4 changed files in this pull request and generated 7 comments.\n\n| File | Description |\n| ---- | ----------- |\n| requirements_all.txt | Adds the `ibroadcastaio` dependency needed by the new provider. |\n| music_assistant/providers/ibroadcast/manifest.json | Declares the new provider and its runtime requirement. |\n| music_assistant/providers/ibroadcast/icon.svg | Adds provider icon asset. |\n| music_assistant/providers/ibroadcast/__init__.py | Implements the iBroadcast provider (auth, library retrieval, parsing, streaming). |\n\n\n\n\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-10-c0-base?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.",
+      "comments": [
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 220,
+          "body": "If parsing the playlist fails, `playlist` is never assigned, but the function still does `return playlist`, which will raise `UnboundLocalError`. Either return directly from the `try` block or raise a consistent parsing error."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 340,
+          "body": "In `_parse_album`, the artist lookup is awaited twice (`await self._client.get_artist(...)` in both the condition and the true branch), causing two network calls for the same data."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 324,
+          "body": "Within this provider, `Artist.provider` is set to `self.domain` in `_parse_artist`, but the special-cased \"Various Artists\" created in `_parse_album` uses `provider=self.instance_id`. This inconsistency can lead to mismatched provider identifiers for artist items coming from the same provider."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 389,
+          "body": "`track.duration` is assigned `track_obj[\"length\"]` after checking `str(...).isdigit()`. If the API returns a numeric string, this sets `duration` to a `str` rather than an `int`, which can break consumers expecting a number."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 161,
+          "body": "`get_artist_albums` appends the coroutine returned by `_parse_album` instead of awaiting it, so this returns `list[Coroutine]` rather than `list[Album]`."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 120,
+          "body": "`handle_async_init` creates an `aiohttp.ClientSession` inside an `async with` block and stores an `IBroadcastClient` that references that session. When the context manager exits, the session is closed, so subsequent provider calls will fail with \"Session is closed\"-style errors.\n\nPrefer using the long-lived `mass.http_session` (as other providers do) or keep your own session as an instance attribute and close it in `unload()`."
+        },
+        {
+          "path": "requirements_all.txt",
+          "line": 22,
+          "body": "The PR description indicates this is only a benchmark repro for music-assistant/server#1799 and \"Safe to close\", but this change set adds a new iBroadcast provider (new provider package requirement and provider implementation files). Please update the PR title/description to match the actual scope, or move these provider changes to a dedicated PR."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 10,
+    "config": "c1",
+    "pr": 19,
+    "repo": "music-assistant/server",
+    "src_pr": 1799,
+    "author": "marcelveldt",
+    "ground_truth": "This is always MPEG ? If you are not sure you can use unknown here which instructs ffmpeg to work it out",
+    "path": "music_assistant/providers/ibroadcast/__init__.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "## Pull request overview\n\nThis PR introduces a new iBroadcast music provider (including its manifest and icon) and adds the `ibroadcastaio` dependency required to support it. It also adds an OHF Sage review-skill document set under `.github/skills/`.\n\n**Changes:**\n- Add `ibroadcastaio==0.3.1` to the global requirements list.\n- Add a new `music_assistant.providers.ibroadcast` provider implementation + manifest/icon.\n- Add `.github/skills/ohf-sage/*` documentation for review principles.\n\n### Reviewed changes\n\nCopilot reviewed 5 out of 6 changed files in this pull request and generated 9 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| requirements_all.txt | Adds `ibroadcastaio` dependency needed by the new provider. |\r\n| music_assistant/providers/ibroadcast/manifest.json | Declares the new provider metadata and its pinned requirement. |\r\n| music_assistant/providers/ibroadcast/icon.svg | Adds the provider icon asset. |\r\n| music_assistant/providers/ibroadcast/__init__.py | Implements the iBroadcast provider logic (auth, library retrieval, parsing, streaming). |\r\n| .github/skills/ohf-sage/SKILL.md | Adds OHF Sage skill definition/documentation. |\r\n| .github/skills/ohf-sage/principles.md | Adds detailed project principles used by the OHF Sage skill. |\n</details>\n\n\n\n\n\n\n\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-10-c1-base?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.",
+      "comments": [
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 121,
+          "body": "[PROBLEM] handle_async_init creates a new aiohttp ClientSession in an async context manager, which closes at the end of the method; that will break all subsequent API calls made by IBroadcastClient. Music Assistant providers should also reuse the shared session (self.mass.http_session) instead of creating their own (see https://github.com/music-assistant/server/pull/1817#discussion_r1903244819)."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 161,
+          "body": "get_artist_albums appends the coroutine returned by _parse_album instead of the parsed Album, because _parse_album is async but isn\u2019t awaited. This will return a list of coroutine objects and likely break callers."
+        },
+        {
+          "path": "requirements_all.txt",
+          "line": 22,
+          "body": "The PR description says this is a benchmark/repro \u201csafe to close\u201d, but this change adds a new runtime dependency (ibroadcastaio) and a full new provider implementation. Please update the PR description to match the intent/scope, or move the provider work into its own PR so it\u2019s reviewable/trackable."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 220,
+          "body": "get_playlist swallows parse errors and then returns `playlist`, which is undefined if an exception occurs (UnboundLocalError). Also, per MA guidelines, avoid swallowing errors; raise a typed exception instead (see e.g. https://github.com/music-assistant/server/pull/1214#discussion_r1557137671)."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 340,
+          "body": "_parse_album calls self._client.get_artist(album_obj[\"artist_id\"]) twice, which doubles network/API work per album. At minimum, fetch once and reuse the result. Longer-term, consider keeping parsers IO-free and moving lookups out of parsing (see https://github.com/music-assistant/server/pull/2472#discussion_r2400974607)."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 204,
+          "body": "[PROBLEM] Private helper methods (_get_artist_item_mapping/_get_item_mapping) are defined in the middle of the class, with public methods below them. The project enforces ordering public/dunder methods first and private helpers at the bottom (see https://github.com/music-assistant/server/pull/4015#discussion_r3428284831)."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 264,
+          "body": "_get_tracks fetches and parses each track sequentially (await in a for-loop). For playlists/albums with many tracks this can be very slow and becomes an N+1 pattern against the upstream API; consider batching via a bulk endpoint if available or using bounded concurrency (asyncio.gather + semaphore) (see https://github.com/music-assistant/server/pull/3171#discussion_r2813508549)."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 414,
+          "body": "_parse_track performs API lookups (get_artist/get_album) while parsing. This turns library listings into an N+1 set of network calls and also violates the MA guideline that parsers should be lightweight and IO-free (see https://github.com/music-assistant/server/pull/2472#discussion_r2400974607 and https://github.com/music-assistant/server/pull/2501#discussion_r2429740886). Consider moving these lookups to the calling methods (with caching) and keeping parsing purely on the provided track payload."
+        },
+        {
+          "path": "music_assistant/providers/ibroadcast/__init__.py",
+          "line": 270,
+          "body": "There are provider-level tests in this repo (e.g. tests/providers/jellyfin/*) but this new provider has no tests for its parsing/mapping logic. Adding snapshot/fixture-based tests for album/artist/track parsing would help prevent regressions and clarify expected behavior."
+        }
+      ]
+    }
+  }
+]

@@ -5,3 +5,4 @@ corpus/
 *.egg-info/
 build/
 agent/ohf-sage-corpus.jsonl
+copilot_bench/bench_state.json

@@ -1,0 +1,57 @@
+diff --git a/music_assistant/providers/ytmusic/helpers.py b/music_assistant/providers/ytmusic/helpers.py
+index dc7ac06e7b..1c5624bd23 100644
+--- a/music_assistant/providers/ytmusic/helpers.py
++++ b/music_assistant/providers/ytmusic/helpers.py
+@@ -50,14 +50,23 @@ async def get_album(
+     """Async wrapper around the ytmusicapi get_album function."""
+ 
+     def _get_album() -> dict[str, Any]:
++        private = False
+         if prov_album_id.startswith("FEmusic_library_privately_owned_release"):
++            private = True
+             ytm = ytmusicapi.YTMusic(auth=headers, language=language, user=user)
+             album = ytm.get_library_upload_album(browseId=prov_album_id)
++
++            for album_track in album.get("tracks", []):
++                # note: side-effect of the album/playlist videoId xreference below is
++                # to default these values if not present, so I'm reproducing that here
++                # given we don't need to (and can't) do the query that wraps it
++                album_track["isAvailable"] = album_track.get("isAvailable", True)
++                album_track["likeStatus"] = album_track.get("likeStatus", "INDIFFERENT")
++
+         else:
+             ytm = ytmusicapi.YTMusic(language=language)
+             album = ytm.get_album(browseId=prov_album_id)
+-
+-        if "audioPlaylistId" in album:
++        if "audioPlaylistId" in album and not private:
+             # Track id's from album tracks do not match with actual album tracks. E.g. a track
+             # points to the videoId of the original version, while we want the album version
+             try:
+@@ -169,7 +178,7 @@ async def get_library_artists(
+ 
+     def _get_library_artists() -> list[dict[str, Any]]:
+         ytm = ytmusicapi.YTMusic(auth=headers, language=language, user=user)
+-        artists = ytm.get_library_subscriptions(limit=9999)
++        artists = ytm.get_library_subscriptions(limit=9999) + ytm.get_library_artists(limit=9999) + ytm.get_library_upload_artists(limit=9999)
+         # Sync properties with uniformal artist object
+         for artist in artists:
+             artist["id"] = artist["browseId"]
+@@ -188,7 +197,7 @@ async def get_library_albums(
+ 
+     def _get_library_albums() -> list[dict[str, Any]]:
+         ytm = ytmusicapi.YTMusic(auth=headers, language=language, user=user)
+-        return ytm.get_library_albums(limit=9999)
++        return ytm.get_library_albums(limit=9999) + ytm.get_library_upload_albums(limit=9999)
+ 
+     return await asyncio.to_thread(_get_library_albums)
+ 
+@@ -218,7 +227,7 @@ async def get_library_tracks(
+ 
+     def _get_library_tracks() -> list[dict[str, Any]]:
+         ytm = ytmusicapi.YTMusic(auth=headers, language=language, user=user)
+-        return ytm.get_library_songs(limit=9999)
++        return ytm.get_library_songs(limit=9999) + ytm.get_library_upload_songs(limit=9999)
+ 
+     return await asyncio.to_thread(_get_library_tracks)
+ 

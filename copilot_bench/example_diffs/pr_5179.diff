@@ -1,0 +1,1207 @@
+diff --git a/music_assistant/controllers/music/database.py b/music_assistant/controllers/music/database.py
+index 225e3369d6..ef16198b28 100644
+--- a/music_assistant/controllers/music/database.py
++++ b/music_assistant/controllers/music/database.py
+@@ -682,6 +682,17 @@ async def __create_database_indexes(self) -> None:
+             f"CREATE INDEX IF NOT EXISTS {DB_TABLE_PLAYLOG}_userid_timestamp_idx "
+             f"on {DB_TABLE_PLAYLOG}(userid,timestamp);"
+         )
++        # podcast episode listings read every resume position for a provider in one query,
++        # filtered on provider/media_type (plus userid when known), ordered by timestamp.
++        # playlog_unique_idx leads with item_id, which that query never filters on, so it
++        # cannot serve it. Column order favours the common case where userid is known: there
++        # the equality prefix reaches timestamp and the ORDER BY needs no sort at all. With
++        # no userid to filter on SQLite still uses this index for the lookup but sorts the
++        # matched rows, which is one provider's episodes rather than the whole playlog
++        await self.database.execute(
++            f"CREATE INDEX IF NOT EXISTS {DB_TABLE_PLAYLOG}_provider_media_type_idx "
++            f"on {DB_TABLE_PLAYLOG}(provider,media_type,userid,timestamp);"
++        )
+         await self.database.commit()
+ 
+     async def __create_database_triggers(self) -> None:
+diff --git a/music_assistant/controllers/music/media/podcasts.py b/music_assistant/controllers/music/media/podcasts.py
+index 1fb0b140b7..176074ba43 100644
+--- a/music_assistant/controllers/music/media/podcasts.py
++++ b/music_assistant/controllers/music/media/podcasts.py
+@@ -341,23 +341,40 @@ async def _get_provider_podcast_episodes(
+             # based on configured provider filter we can try to find a user
+             user = provider_user
+ 
+-        async def set_resume_position(episode: PodcastEpisode) -> None:
+-            if episode.fully_played is not None or episode.resume_position_ms:
+-                # provider supports resume info, we can skip
+-                return
+-            # for providers that do not natively support providing resume info,
+-            # we fallback to the playlog db table
+-            match = {
+-                "item_id": episode.item_id,
++        # resume info for the whole listing is fetched in one query on first use, instead of
++        # one query per episode: a podcast can have thousands of episodes. The query is
++        # scoped to the provider rather than to this podcast, so it reads that provider's
++        # podcast episode rows within the playlog's 90 day retention window
++        resume_rows: dict[str, Mapping[str, Any]] | None = None
++
++        async def load_resume_rows() -> dict[str, Mapping[str, Any]]:
++            match: dict[str, Any] = {
+                 "provider": prov.instance_id,
+                 "media_type": MediaType.PODCAST_EPISODE,
+             }
+             if user is not None:
+                 match["userid"] = user.user_id
+-            resume_info_db_row = await self.mass.music.database.get_row(
+-                DB_TABLE_PLAYLOG,
+-                match=match,
++            # limit=0 disables get_rows' 500 row default. Combined with the ascending sort
++            # that cap would keep the oldest rows and drop the newest - exactly the
++            # part-played episodes this lookup exists to find. The same ordering also
++            # resolves duplicates: with no userid filter several users can hold a row for
++            # one item_id, and the newest then overwrites the others in the map built below.
++            # the single row lookup this replaced picked one of them arbitrarily
++            rows = await self.mass.music.database.get_rows(
++                DB_TABLE_PLAYLOG, match=match, order_by="timestamp", limit=0
+             )
++            return {row["item_id"]: row for row in rows}
++
++        async def set_resume_position(episode: PodcastEpisode) -> None:
++            nonlocal resume_rows
++            if episode.fully_played is not None or episode.resume_position_ms:
++                # provider supports resume info, we can skip
++                return
++            # for providers that do not natively support providing resume info,
++            # we fallback to the playlog db table
++            if resume_rows is None:
++                resume_rows = await load_resume_rows()
++            resume_info_db_row = resume_rows.get(episode.item_id)
+             if resume_info_db_row is None:
+                 return
+             if resume_info_db_row["seconds_played"]:
+@@ -365,9 +382,10 @@ async def set_resume_position(episode: PodcastEpisode) -> None:
+             if resume_info_db_row["fully_played"] is not None:
+                 episode.fully_played = bool(resume_info_db_row["fully_played"])
+ 
+-        # grab the episodes from the provider
+-        # note that we do not cache any of this because its
+-        # always a rather small list and we want fresh resume info
++        # grab the episodes from the provider. Providers cache their own listing where they
++        # can (filesystem_local on a folder signature, spotify on a TTL), so resume info is
++        # applied here rather than by the provider: that is what keeps per-user progress out
++        # of those caches
+         async for item in prov.get_podcast_episodes(item_id):
+             await set_resume_position(item)
+             yield item
+diff --git a/music_assistant/providers/filesystem_local/__init__.py b/music_assistant/providers/filesystem_local/__init__.py
+index 50eba5214a..881b5656a0 100644
+--- a/music_assistant/providers/filesystem_local/__init__.py
++++ b/music_assistant/providers/filesystem_local/__init__.py
+@@ -94,6 +94,7 @@
+     CACHE_CATEGORY_ARTIST_INFO,
+     CACHE_CATEGORY_AUDIOBOOK_CHAPTERS,
+     CACHE_CATEGORY_FOLDER_IMAGES,
++    CACHE_CATEGORY_PODCAST_EPISODES,
+     CACHE_CATEGORY_PODCAST_METADATA,
+     CACHE_CATEGORY_SOUND_EFFECTS,
+     CONF_CONTENT_TYPE,
+@@ -107,6 +108,7 @@
+     CUE_EXTENSIONS,
+     DEFAULT_AUDIOBOOK_PODCAST_GENRE,
+     IMAGE_EXTENSIONS,
++    PARTIAL_LISTING_CACHE_EXPIRATION,
+     PLAYLIST_EXTENSIONS,
+     PODCAST_EPISODE_EXTENSIONS,
+     SOUND_EFFECT_EXTENSIONS,
+@@ -125,6 +127,7 @@
+     get_absolute_path,
+     get_album_dir,
+     get_artist_dir,
++    get_folder_signature,
+     get_relative_path,
+     recursive_iter,
+     sorted_scandir,
+@@ -826,28 +829,85 @@ async def get_playlist_tracks(self, prov_playlist_id: str, page: int = 0) -> lis
+ 
+     async def get_podcast_episodes(self, prov_podcast_id: str) -> AsyncGenerator[PodcastEpisode]:
+         """Get podcast episodes for given podcast id."""
+-        episodes: list[PodcastEpisode] = []
++        folder_items = [item for item in await self._scandir(prov_podcast_id) if not item.is_dir]
++        episode_files = [x for x in folder_items if x.ext in PODCAST_EPISODE_EXTENSIONS]
++        # the signature covers the folder's artwork and metadata.json as well as its audio,
++        # because the parse embeds those into every episode: new cover art would otherwise
++        # stay hidden until an audio file happened to change
++        signature_files = [
++            x
++            for x in folder_items
++            if x.ext in PODCAST_EPISODE_EXTENSIONS
++            or x.ext in IMAGE_EXTENSIONS
++            # matched case-insensitively: _get_podcast_metadata finds this through exists(),
++            # which resolves that way on APFS/SMB/NTFS, so a Metadata.json the parse embeds
++            # would otherwise never be able to invalidate this entry
++            or x.filename.lower() == "metadata.json"
++        ]
++        cache_key = f"podcast_episodes.{prov_podcast_id}"
++        cache_checksum = get_folder_signature(signature_files)
++        if (
++            cached_episodes := await self.mass.cache.get(
++                cache_key,
++                provider=self.instance_id,
++                category=CACHE_CATEGORY_PODCAST_EPISODES,
++                checksum=cache_checksum,
++                base_class=PodcastEpisode,
++            )
++        ) is not None:
++            for episode in cached_episodes:
++                yield episode
++            return
++
++        # the artwork and metadata.json caches every episode reads from are not checksum
++        # validated, so a re-parse would fill the new entry with the values the signature
++        # just invalidated. Drop them, then refill once: left empty, all _SYNC_CONCURRENCY
++        # parse tasks miss at once and repeat the same scandir and file read. The refill
++        # cannot stick while the cache is bypassed (music/refresh_item), where each task
++        # reads the folder itself exactly as it did before
++        for stale_category in (CACHE_CATEGORY_FOLDER_IMAGES, CACHE_CATEGORY_PODCAST_METADATA):
++            await self.mass.cache.delete(
++                prov_podcast_id, category=stale_category, provider=self.instance_id
++            )
++        await self._get_local_images(prov_podcast_id)
++        await self._get_podcast_metadata(prov_podcast_id)
+ 
+-        async def _process_podcast_episode(item: FileSystemItem) -> None:
+-            tags = await async_parse_tags(item.absolute_path, item.file_size)
++        # collected by index so the listing keeps scandir order, not parse completion order
++        parsed: list[PodcastEpisode | None] = [None] * len(episode_files)
++
++        async def _process_podcast_episode(index: int, item: FileSystemItem) -> None:
+             try:
+-                episode = await self._parse_podcast_episode(item, tags)
++                tags = await async_parse_tags(item.absolute_path, item.file_size)
++                parsed[index] = await self._parse_podcast_episode(item, tags)
+             except MusicAssistantError as err:
+                 self.logger.warning(
+                     "Could not parse uri/file %s to podcast episode: %s",
+                     item.relative_path,
+                     str(err),
+                 )
+-            else:
+-                episodes.append(episode)
+ 
+-        async with TaskManager(self.mass, 25) as tm:
+-            for item in await self._scandir(prov_podcast_id):
+-                if "." not in item.relative_path or item.is_dir:
+-                    continue
+-                if item.ext not in PODCAST_EPISODE_EXTENSIONS:
+-                    continue
+-                tm.create_task(_process_podcast_episode(item))
++        # reuse the per-sync worker limit: webdav and the cloud filesystems lower it to 4 and
++        # are the slowest to parse cold anyway. concurrent listings of the same folder are not
++        # deduped, but the window closes as soon as the first one writes
++        async with TaskManager(self.mass, self._SYNC_CONCURRENCY) as tm:
++            for index, item in enumerate(episode_files):
++                await tm.create_task_with_limit(_process_podcast_episode(index, item))
++
++        episodes = [episode for episode in parsed if episode is not None]
++        # an incomplete listing is cached briefly rather than not at all: one file ffprobe
++        # cannot read would otherwise re-parse the whole folder on every request for as long
++        # as it sits there. Note the entry runs roughly 3-4KB per episode, so a feed of several
++        # thousand still pays a real stall rebuilding them from_dict on the event loop
++        complete = len(episodes) == len(episode_files)
++        await self.mass.cache.set(
++            key=cache_key,
++            data=[episode.to_dict() for episode in episodes],
++            # a complete listing relies on the folder signature to invalidate it instead
++            expiration=3600 * 24 * 365 if complete else PARTIAL_LISTING_CACHE_EXPIRATION,
++            provider=self.instance_id,
++            category=CACHE_CATEGORY_PODCAST_EPISODES,
++            checksum=cache_checksum,
++        )
+ 
+         for episode in episodes:
+             yield episode
+diff --git a/music_assistant/providers/filesystem_local/constants.py b/music_assistant/providers/filesystem_local/constants.py
+index e74263081f..d21fd10792 100644
+--- a/music_assistant/providers/filesystem_local/constants.py
++++ b/music_assistant/providers/filesystem_local/constants.py
+@@ -160,5 +160,11 @@ class IsChapterFile(Exception):
+ CACHE_CATEGORY_PODCAST_METADATA: Final[int] = 5
+ CACHE_CATEGORY_CUE_SHEETS: Final[int] = 6
+ CACHE_CATEGORY_SOUND_EFFECTS: Final[int] = 7
++CACHE_CATEGORY_PODCAST_EPISODES: Final[int] = 8
++
++# how long a podcast episode listing that lost a file to a parse failure is cached for.
++# short, because the missing episode reappears no sooner than this, but long enough that
++# an unreadable file cannot make every request re-parse the whole folder
++PARTIAL_LISTING_CACHE_EXPIRATION: Final[int] = 300
+ 
+ DEFAULT_AUDIOBOOK_PODCAST_GENRE: Final[str] = "Spoken Word"
+diff --git a/music_assistant/providers/filesystem_local/helpers.py b/music_assistant/providers/filesystem_local/helpers.py
+index 1e7536964c..c0ade5b355 100644
+--- a/music_assistant/providers/filesystem_local/helpers.py
++++ b/music_assistant/providers/filesystem_local/helpers.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ import errno
++import hashlib
+ import logging
+ import os
+ import re
+@@ -109,6 +110,19 @@ def from_dir_entry(cls, entry: os.DirEntry[str], base_path: str) -> FileSystemIt
+         )
+ 
+ 
++def get_folder_signature(items: list[FileSystemItem]) -> str:
++    """
++    Return a digest of the given files' paths, modification times and sizes.
++
++    Callers use this as a cache checksum: any file added, removed, replaced or
++    retagged changes the digest. The result is independent of the order of the items.
++
++    :param items: The files to include in the digest.
++    """
++    parts = sorted(f"{x.relative_path}:{x.checksum}:{x.file_size}" for x in items)
++    return hashlib.sha256("|".join(parts).encode()).hexdigest()
++
++
+ def get_artist_dir(
+     artist_name: str,
+     album_dir: str | None,
+diff --git a/tests/controllers/music/test_podcast_episode_resume.py b/tests/controllers/music/test_podcast_episode_resume.py
+new file mode 100644
+index 0000000000..84bc91d425
+--- /dev/null
++++ b/tests/controllers/music/test_podcast_episode_resume.py
+@@ -0,0 +1,342 @@
++"""
++Tests for applying per-user resume info to a provider's podcast episode listing.
++
++Resume info for a listing is read from the playlog table in one batched query, no matter
++how many episodes the podcast has. The integration tests use the ``mass`` fixture from
++``tests/conftest.py``, which creates a full MusicAssistant instance with a real SQLite
++database in a temporary directory.
++"""
++
++from __future__ import annotations
++
++from collections.abc import AsyncGenerator, Callable
++from typing import TYPE_CHECKING, Any
++from unittest.mock import AsyncMock, MagicMock, patch
++
++import pytest
++from music_assistant_models.enums import MediaType
++from music_assistant_models.media_items import Podcast, PodcastEpisode, ProviderMapping
++
++from music_assistant.constants import DB_TABLE_PLAYLOG
++from music_assistant.mass import MusicAssistant
++from music_assistant.models.music_provider import MusicProvider
++
++if TYPE_CHECKING:
++    from music_assistant_models.auth import User
++
++PROVIDER_ID = "test_podcast_prov"
++PODCAST_ID = "show-001"
++
++
++class _StubPodcastProvider(MusicProvider):
++    """Minimal music provider yielding a prepared list of podcast episodes."""
++
++    def __init__(self, episodes: list[PodcastEpisode]) -> None:
++        """
++        Initialize the stub provider.
++
++        :param episodes: The episodes to yield from get_podcast_episodes.
++        """
++        self.episodes = episodes
++        self.config = MagicMock()
++        self.config.instance_id = PROVIDER_ID
++        self.manifest = MagicMock()
++        self.manifest.domain = PROVIDER_ID
++        self.logger = MagicMock()
++
++    async def get_podcast_episodes(self, prov_podcast_id: str) -> AsyncGenerator[PodcastEpisode]:
++        """Yield the prepared episodes for the given podcast id."""
++        for episode in self.episodes:
++            yield episode
++
++
++def _episode(index: int, **kwargs: Any) -> PodcastEpisode:
++    """
++    Build a provider podcast episode.
++
++    :param index: Episode number, also used to derive its item id.
++    :param kwargs: Extra PodcastEpisode attributes (e.g. resume info).
++    """
++    item_id = f"ep-{index:03d}"
++    return PodcastEpisode(
++        item_id=item_id,
++        provider=PROVIDER_ID,
++        name=f"Episode {index}",
++        provider_mappings={
++            ProviderMapping(
++                item_id=item_id,
++                provider_domain=PROVIDER_ID,
++                provider_instance=PROVIDER_ID,
++            )
++        },
++        position=index,
++        podcast=Podcast(
++            item_id=PODCAST_ID,
++            provider=PROVIDER_ID,
++            name="My Podcast",
++            provider_mappings={
++                ProviderMapping(
++                    item_id=PODCAST_ID,
++                    provider_domain=PROVIDER_ID,
++                    provider_instance=PROVIDER_ID,
++                )
++            },
++        ),
++        **kwargs,
++    )
++
++
++async def _add_playlog_row(
++    mass: MusicAssistant,
++    item_id: str,
++    userid: str,
++    seconds_played: int,
++    fully_played: bool,
++    timestamp: int = 1000,
++) -> None:
++    """Seed one playlog row for a podcast episode."""
++    await mass.music.database.insert(
++        DB_TABLE_PLAYLOG,
++        {
++            "item_id": item_id,
++            "provider": PROVIDER_ID,
++            "media_type": MediaType.PODCAST_EPISODE.value,
++            "name": item_id,
++            "userid": userid,
++            "seconds_played": seconds_played,
++            "fully_played": fully_played,
++            "timestamp": timestamp,
++        },
++        allow_replace=True,
++    )
++
++
++@pytest.fixture(name="count_playlog_queries")
++def count_playlog_queries_fixture(
++    mass: MusicAssistant, monkeypatch: pytest.MonkeyPatch
++) -> Callable[[], int]:
++    """Count every database read of the playlog table, single row or batched."""
++    calls = 0
++
++    def _counted(name: str) -> Callable[..., Any]:
++        original = getattr(mass.music.database, name)
++
++        async def _wrapper(table: str, *args: Any, **kwargs: Any) -> Any:
++            nonlocal calls
++            if table == DB_TABLE_PLAYLOG:
++                calls += 1
++            return await original(table, *args, **kwargs)
++
++        return _wrapper
++
++    for name in ("get_row", "get_rows"):
++        monkeypatch.setattr(mass.music.database, name, _counted(name))
++    return lambda: calls
++
++
++async def _list_episodes(
++    mass: MusicAssistant,
++    episodes: list[PodcastEpisode],
++    user: User | None = None,
++) -> list[PodcastEpisode]:
++    """
++    Run the controller's provider listing for a stub provider.
++
++    :param mass: The MusicAssistant instance to run against.
++    :param episodes: The episodes the stub provider yields.
++    :param user: The session user the request is made for, if any.
++    """
++    provider = _StubPodcastProvider(episodes)
++    with (
++        patch.object(mass, "get_provider", return_value=provider),
++        patch(
++            "music_assistant.controllers.music.media.podcasts.get_current_user",
++            return_value=user,
++        ),
++    ):
++        return [
++            x
++            async for x in mass.music.podcasts._get_provider_podcast_episodes(
++                PODCAST_ID, PROVIDER_ID
++            )
++        ]
++
++
++async def _explain_resume_query(mass: MusicAssistant, user: User | None) -> list[str]:
++    """
++    Return the query plan rows for the batched resume query as the controller emits it.
++
++    :param mass: The MusicAssistant instance to run against.
++    :param user: The session user the request is made for, if any.
++    """
++    database = mass.music.database
++    # drop the planner statistics so SQLite assumes its default (large) table size instead of
++    # the handful of rows seeded here, where scanning the table really is the cheaper plan
++    await database.execute("ANALYZE")
++    await database.execute("DELETE FROM sqlite_stat1")
++    await database.execute("ANALYZE sqlite_master")
++
++    captured: dict[str, Any] = {}
++    original = database._db.execute_fetchall
++
++    async def _spy(sql: str, params: Any = None) -> Any:
++        if DB_TABLE_PLAYLOG in sql and sql.startswith("SELECT"):
++            captured["sql"], captured["params"] = sql, params
++        return await original(sql, params)
++
++    with patch.object(database._db, "execute_fetchall", _spy):
++        await _list_episodes(mass, [_episode(1)], user=user)
++
++    # the emitted query is explained rather than a copy of it, so the plan cannot drift
++    # away from the query this test claims to cover
++    assert "sql" in captured, "no playlog select was emitted"
++    plan = await database.get_rows_from_query(
++        f"EXPLAIN QUERY PLAN {captured['sql']}", captured["params"], limit=0
++    )
++    return [row["detail"] for row in plan]
++
++
++async def test_resume_info_is_scoped_to_the_requesting_user(mass: MusicAssistant) -> None:
++    """The requesting user's progress is applied; another user's progress is ignored."""
++    user = await mass.webserver.auth.create_user("podcastresume")
++    other_user = await mass.webserver.auth.create_user("podcastresumeother")
++    await _add_playlog_row(mass, "ep-001", user.user_id, seconds_played=90, fully_played=False)
++    await _add_playlog_row(mass, "ep-002", other_user.user_id, seconds_played=30, fully_played=True)
++
++    result = await _list_episodes(mass, [_episode(1), _episode(2)], user=user)
++
++    assert result[0].resume_position_ms == 90000
++    assert result[0].fully_played is False
++    assert result[1].resume_position_ms is None
++    assert result[1].fully_played is None
++
++
++async def test_native_resume_info_is_not_overwritten(mass: MusicAssistant) -> None:
++    """An episode that arrives with resume info from its provider is left untouched."""
++    user = await mass.webserver.auth.create_user("podcastnative")
++    await _add_playlog_row(mass, "ep-001", user.user_id, seconds_played=90, fully_played=True)
++
++    episode = _episode(1, fully_played=False, resume_position_ms=5000)
++    result = await _list_episodes(mass, [episode], user=user)
++
++    assert result[0].fully_played is False
++    assert result[0].resume_position_ms == 5000
++
++
++async def test_listing_uses_a_single_playlog_query(
++    mass: MusicAssistant, count_playlog_queries: Callable[[], int]
++) -> None:
++    """Resume info for an entire listing costs one query, not one query per episode."""
++    user = await mass.webserver.auth.create_user("podcastbatched")
++    await _add_playlog_row(mass, "ep-005", user.user_id, seconds_played=120, fully_played=False)
++
++    episodes = [_episode(index) for index in range(1, 26)]
++    result = await _list_episodes(mass, episodes, user=user)
++
++    assert count_playlog_queries() == 1
++    assert len(result) == 25
++    assert result[4].resume_position_ms == 120000
++
++
++async def test_no_playlog_query_when_provider_supplies_resume_info(
++    mass: MusicAssistant, count_playlog_queries: Callable[[], int]
++) -> None:
++    """A provider that reports resume info natively triggers no playlog query at all."""
++    user = await mass.webserver.auth.create_user("podcastnativeonly")
++    episodes = [_episode(index, fully_played=False, resume_position_ms=1000) for index in (1, 2)]
++
++    result = await _list_episodes(mass, episodes, user=user)
++
++    assert count_playlog_queries() == 0
++    assert all(x.resume_position_ms == 1000 for x in result)
++
++
++async def test_resume_info_is_not_capped_by_the_default_row_limit(mass: MusicAssistant) -> None:
++    """
++    Resume info survives a playlog holding more rows than the default query limit.
++
++    get_rows caps at 500 rows unless limit=0 is passed, and the batched query sorts by
++    ascending timestamp - so the cap keeps the *oldest* rows and drops the newest, which are
++    exactly the episodes a listener is part way through. The playlog keeps 90 days of history
++    across every podcast of a provider, so busy households cross 500 rows.
++    """
++    user = await mass.webserver.auth.create_user("podcastrowlimit")
++    row_count = 501
++    for index in range(1, row_count + 1):
++        # ascending timestamps: the newest row sorts last and is the first one a cap drops
++        await _add_playlog_row(
++            mass,
++            f"ep-{index:03d}",
++            user.user_id,
++            seconds_played=index,
++            fully_played=False,
++            timestamp=1000 + index,
++        )
++
++    # the oldest row doubles as a control: it survives either way, so a failure below
++    # points at the cap rather than at resume lookup being broken altogether
++    result = await _list_episodes(mass, [_episode(1), _episode(row_count)], user=user)
++
++    assert result[0].resume_position_ms == 1000
++    assert result[1].resume_position_ms == row_count * 1000
++
++
++async def test_resume_query_uses_the_provider_media_type_index(mass: MusicAssistant) -> None:
++    """
++    The batched resume query is served by an index instead of scanning the playlog.
++
++    It filters on provider/media_type/userid, which the item_id-first unique index cannot
++    serve, so without a dedicated index SQLite falls back to the userid index and reads every
++    row that user ever played, of every media type. The playlog holds 90 days of history for
++    the whole household, so that cost grows with listening activity rather than podcast size.
++    """
++    user = await mass.webserver.auth.create_user("podcastindexplan")
++    await _add_playlog_row(mass, "ep-001", user.user_id, seconds_played=10, fully_played=False)
++
++    details = await _explain_resume_query(mass, user)
++
++    assert any(f"USING INDEX {DB_TABLE_PLAYLOG}_provider_media_type_idx" in x for x in details), (
++        details
++    )
++    # with userid in the filter the equality prefix reaches timestamp, so the index satisfies
++    # the ORDER BY on its own. That part does not survive userid dropping out of the filter -
++    # the test below covers what still holds there
++    assert not any("TEMP B-TREE" in x for x in details), details
++
++
++async def test_resume_query_uses_the_index_without_a_session_user(mass: MusicAssistant) -> None:
++    """
++    The batched resume query still avoids a playlog scan when no user can be resolved.
++
++    Without a userid to filter on, the usable equality prefix stops at provider/media_type and
++    SQLite sorts the matched rows rather than reading them already ordered. The lookup itself
++    still has to go through the index: that sort covers one provider's episodes, where a table
++    scan would cover the whole household's 90 days of history.
++    """
++    await _add_playlog_row(mass, "ep-001", "user-a", seconds_played=10, fully_played=False)
++
++    with patch.object(
++        mass.music, "_get_user_for_provider", new_callable=AsyncMock, return_value=None
++    ):
++        details = await _explain_resume_query(mass, None)
++
++    assert any(f"USING INDEX {DB_TABLE_PLAYLOG}_provider_media_type_idx" in x for x in details), (
++        details
++    )
++
++
++async def test_without_a_session_user_the_newest_progress_wins(mass: MusicAssistant) -> None:
++    """With no user to scope to, the most recently played row is applied."""
++    # the newest row is deliberately both inserted first and owned by the alphabetically
++    # first userid, so neither insertion order nor the index's (userid, timestamp) key order
++    # can leave it last. The map the controller builds keeps whichever row it sees last, so
++    # only an explicit sort on timestamp lands on the 240s one
++    await _add_playlog_row(mass, "ep-001", "user-a", 240, fully_played=False, timestamp=2000)
++    await _add_playlog_row(mass, "ep-001", "user-b", 30, fully_played=False, timestamp=1000)
++
++    with patch.object(
++        mass.music, "_get_user_for_provider", new_callable=AsyncMock, return_value=None
++    ):
++        result = await _list_episodes(mass, [_episode(1)], user=None)
++
++    assert result[0].resume_position_ms == 240000
+diff --git a/tests/providers/filesystem/test_podcast_episodes_cache.py b/tests/providers/filesystem/test_podcast_episodes_cache.py
+new file mode 100644
+index 0000000000..42c648609d
+--- /dev/null
++++ b/tests/providers/filesystem/test_podcast_episodes_cache.py
+@@ -0,0 +1,524 @@
++"""Tests for the filesystem provider's self-validating podcast episode list cache."""
++
++from __future__ import annotations
++
++import asyncio
++import logging
++import os
++import pathlib
++from typing import Any
++from unittest.mock import AsyncMock, MagicMock, patch
++
++import pytest
++from music_assistant_models.errors import InvalidDataError, MediaNotFoundError
++from music_assistant_models.media_items import Podcast, PodcastEpisode
++
++from music_assistant.helpers.tags import AudioTags
++from music_assistant.mass import MusicAssistant
++from music_assistant.providers.filesystem_local import LocalFileSystemProvider
++from music_assistant.providers.filesystem_local.constants import (
++    CACHE_CATEGORY_PODCAST_EPISODES,
++    PARTIAL_LISTING_CACHE_EXPIRATION,
++)
++
++PODCAST_FOLDER = "My Podcast"
++INSTANCE_ID = "filesystem_local--test"
++PARSE_TAGS_TARGET = "music_assistant.providers.filesystem_local.async_parse_tags"
++
++
++def _audio_tags(path: str, chapters: bool = False) -> AudioTags:
++    """
++    Build AudioTags as ffprobe would report them for one generated episode file.
++
++    :param path: Absolute path of the file being parsed.
++    :param chapters: Whether to report an embedded chapter.
++    """
++    filename = pathlib.Path(path).name
++    # episode-03.mp3 -> track 3
++    track = int(filename.split("-")[1].split(".")[0])
++    raw: dict[str, object] = {}
++    if chapters:
++        raw["chapters"] = [
++            {"id": 1, "start_time": "0.0", "end_time": "21.0", "tags": {"title": "Intro"}},
++            {"id": 2, "start_time": "21.0", "end_time": "42.0", "tags": {"title": "Outro"}},
++        ]
++    return AudioTags(
++        raw=raw,
++        sample_rate=44100,
++        channels=2,
++        bits_per_sample=16,
++        format="mp3",
++        bit_rate=128,
++        duration=42.0,
++        tags={
++            "album": PODCAST_FOLDER,
++            "title": f"Episode {track}",
++            "track": str(track),
++            "publisher": "ACME Radio",
++            "comment": f"description of episode {track}",
++        },
++        has_cover_image=False,
++        filename=filename,
++    )
++
++
++def _parse_tags_spy(chapters: bool = False, slow_first: bool = False) -> AsyncMock:
++    """
++    Return an AsyncMock standing in for async_parse_tags, counting the files it parses.
++
++    :param chapters: Whether the reported tags include embedded chapters.
++    :param slow_first: Make the first episode finish last, so that a listing collected in
++        task completion order comes out in a different order than the directory listing.
++    """
++
++    async def _parse(path: str, _size: int | None = None) -> AudioTags:
++        if slow_first and path.endswith("episode-01.mp3"):
++            await asyncio.sleep(0.05)
++        return _audio_tags(path, chapters)
++
++    return AsyncMock(side_effect=_parse)
++
++
++def _write_episodes(folder: pathlib.Path, count: int) -> None:
++    """Create `count` dummy episode files; their tags are supplied by the parse spy."""
++    folder.mkdir(parents=True, exist_ok=True)
++    for index in range(1, count + 1):
++        (folder / f"episode-{index:02d}.mp3").write_bytes(b"dummy audio")
++
++
++@pytest.fixture(name="provider")
++async def provider_fixture(
++    mass_minimal: MusicAssistant, tmp_path: pathlib.Path
++) -> LocalFileSystemProvider:
++    """Create a podcasts filesystem provider backed by a real cache database."""
++    # the mass_minimal fixture constructs the cache controller but never sets up its database
++    await mass_minimal.cache.setup(await mass_minimal.config.get_core_config("cache"))
++    base_path = tmp_path / "media"
++    base_path.mkdir()
++    _write_episodes(base_path / PODCAST_FOLDER, 3)
++
++    # __new__ skips __init__, which would resolve the log level and content type through
++    # config plumbing a bare test provider cannot satisfy
++    provider = LocalFileSystemProvider.__new__(LocalFileSystemProvider)
++    provider.mass = mass_minimal
++    provider.config = MagicMock()
++    provider.config.instance_id = INSTANCE_ID
++    provider.manifest = MagicMock()
++    provider.manifest.domain = "filesystem_local"
++    provider.cache = mass_minimal.cache
++    provider.logger = logging.getLogger("test.filesystem_local")
++    provider.base_path = str(base_path)
++    provider.media_content_type = "podcasts"
++    provider.write_access = False
++    provider.sync_running = False
++    return provider
++
++
++async def test_second_listing_is_served_from_cache(provider: LocalFileSystemProvider) -> None:
++    """A second listing of an unchanged folder parses no files at all."""
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        first = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++    assert parse_tags.await_count == 3
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        second = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++    parse_tags.assert_not_awaited()
++
++    assert [x.to_dict() for x in second] == [x.to_dict() for x in first]
++
++
++async def test_listing_keeps_scandir_order(provider: LocalFileSystemProvider) -> None:
++    """Episodes are yielded in (natural sorted) directory order, cold and cached alike."""
++    expected = [f"{PODCAST_FOLDER}/episode-{index:02d}.mp3" for index in (1, 2, 3)]
++    # the first episode parses slowest, so collecting in task completion order would
++    # produce [02, 03, 01] here - the order this test exists to rule out
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy(slow_first=True)):
++        cold = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++        cached = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert [x.item_id for x in cold] == expected
++    assert [x.item_id for x in cached] == expected
++
++
++async def test_parsing_stays_within_the_concurrency_limit(
++    provider: LocalFileSystemProvider, tmp_path: pathlib.Path
++) -> None:
++    """
++    A cold listing never runs more parse tasks at once than _SYNC_CONCURRENCY allows.
++
++    Parsing shells out to ffprobe through the shared thread executor, so an unbounded fan-out
++    over a large podcast starves every other thread pool user for the duration of the listing.
++    TaskManager.create_task does not honour the limit it was constructed with - only
++    create_task_with_limit acquires the semaphore - which makes this a one-word regression.
++    """
++    episode_count = provider._SYNC_CONCURRENCY * 2 + 8
++    _write_episodes(tmp_path / "media" / "Big Podcast", episode_count)
++    in_flight = 0
++    peak = 0
++
++    async def _parse(path: str, _size: int | None = None) -> AudioTags:
++        nonlocal in_flight, peak
++        in_flight += 1
++        peak = max(peak, in_flight)
++        # hold the slot open, so tasks started together overlap here rather than
++        # running to completion one by one and never registering as concurrent
++        await asyncio.sleep(0.01)
++        in_flight -= 1
++        return _audio_tags(path)
++
++    with patch(PARSE_TAGS_TARGET, new=AsyncMock(side_effect=_parse)) as parse_tags:
++        result = [x async for x in provider.get_podcast_episodes("Big Podcast")]
++
++    assert parse_tags.await_count == episode_count
++    assert len(result) == episode_count
++    assert peak <= provider._SYNC_CONCURRENCY
++    # without this the assertion above would also hold for a fully serialized listing,
++    # which is not what the limit is for
++    assert peak > 1
++
++
++async def test_added_file_invalidates_cache(
++    provider: LocalFileSystemProvider, tmp_path: pathlib.Path
++) -> None:
++    """A new episode file is picked up on the next listing, with no sync in between."""
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()):
++        [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    (tmp_path / "media" / PODCAST_FOLDER / "episode-04.mp3").write_bytes(b"dummy audio")
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        result = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert parse_tags.await_count == 4
++    assert f"{PODCAST_FOLDER}/episode-04.mp3" in [x.item_id for x in result]
++
++
++async def test_added_cover_art_reaches_the_listing(
++    provider: LocalFileSystemProvider, tmp_path: pathlib.Path
++) -> None:
++    """
++    Cover art added to the folder shows up on the next listing.
++
++    Local images are read while parsing and embedded in every cached episode (as the parent
++    podcast's image, and as the episode thumbnail for files without embedded art), so art
++    that leaves the cache valid would stay invisible for the life of the entry. Note this
++    covers *adding* a file rather than overwriting one: the parsed image is a bare path with
++    no version suffix, so replacing cover.jpg in place is served fresh from disk regardless.
++    """
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()):
++        first = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++    assert isinstance(first[0].podcast, Podcast)
++    assert first[0].podcast.image is None
++
++    (tmp_path / "media" / PODCAST_FOLDER / "cover.jpg").write_bytes(b"art")
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        second = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert parse_tags.await_count == 3, "the folder signature should have invalidated"
++    assert isinstance(second[0].podcast, Podcast)
++    # not just re-parsed: the new art has to survive the folder-images cache too
++    assert second[0].podcast.image is not None
++    assert second[0].podcast.image.path == f"{PODCAST_FOLDER}/cover.jpg"
++
++
++async def test_edited_metadata_json_is_not_refrozen_from_the_inner_cache(
++    provider: LocalFileSystemProvider, tmp_path: pathlib.Path
++) -> None:
++    """
++    An edited metadata.json reaches the re-parsed listing instead of a stale copy of itself.
++
++    The folder's metadata.json and artwork are read through their own per-folder caches, and
++    neither is checksum validated. A re-parse triggered by the folder signature must not be
++    filled from those, or the very edit that invalidated the listing is frozen back into it -
++    permanently, because the new entry's signature then matches the folder.
++    """
++    metadata_file = tmp_path / "media" / PODCAST_FOLDER / "metadata.json"
++    metadata_file.write_text('{"title": "Old Name"}')
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()):
++        first = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++    assert isinstance(first[0].podcast, Podcast)
++    assert first[0].podcast.name == "Old Name"
++
++    # a different length as well as different content: the signature's mtime is whole
++    # seconds, so within one second only the size distinguishes the two files
++    metadata_file.write_text('{"title": "A Brand New Name"}')
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        second = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert parse_tags.await_count == 3, "the folder signature should have invalidated"
++    assert isinstance(second[0].podcast, Podcast)
++    assert second[0].podcast.name == "A Brand New Name"
++
++
++async def test_cold_parse_reads_the_folder_artwork_once(
++    provider: LocalFileSystemProvider, tmp_path: pathlib.Path
++) -> None:
++    """
++    Invalidating the artwork cache does not make every parse task go and rebuild it.
++
++    Each episode embeds the folder's artwork, read through a per-folder cache that this
++    listing has just had to drop. Left empty, all _SYNC_CONCURRENCY parse tasks miss it at
++    once and each repeats the same scandir, which on the high latency transports that lower
++    that limit is the expensive part.
++    """
++    (tmp_path / "media" / PODCAST_FOLDER / "cover.jpg").write_bytes(b"cover")
++    scandir_calls: list[str] = []
++    original_scandir = provider._scandir
++
++    async def _spy_scandir(path: str) -> Any:
++        scandir_calls.append(path)
++        return await original_scandir(path)
++
++    with (
++        patch.object(provider, "_scandir", _spy_scandir),
++        patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags,
++    ):
++        episodes = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert parse_tags.await_count == 3, "this has to be the cold path to prove anything"
++    assert len(episodes) == 3
++    # the listing's own scandir, plus one to fill the artwork cache for all three episodes
++    assert len(scandir_calls) == 2, scandir_calls
++
++
++async def test_case_variant_metadata_json_is_covered_by_the_signature(
++    provider: LocalFileSystemProvider, tmp_path: pathlib.Path
++) -> None:
++    """
++    A folder holding `Metadata.json` still invalidates its listing when that file is edited.
++
++    _get_podcast_metadata locates the file through exists(), which resolves
++    case-insensitively on APFS, SMB and NTFS - so the parse embeds a `Metadata.json` that a
++    case-sensitive signature check leaves uncovered, freezing the listing for the lifetime of
++    the entry. This asserts on invalidation rather than on the embedded name, so it holds on
++    case-sensitive filesystems too, where the parse never reads the file in the first place.
++    """
++    metadata_file = tmp_path / "media" / PODCAST_FOLDER / "Metadata.json"
++    metadata_file.write_text('{"title": "Old Name"}')
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()):
++        [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    # a different length as well as different content: the signature's mtime is whole
++    # seconds, so within one second only the size distinguishes the two files
++    metadata_file.write_text('{"title": "A Brand New Name"}')
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert parse_tags.await_count == 3, "the folder signature should have invalidated"
++
++
++async def test_removed_file_invalidates_cache(
++    provider: LocalFileSystemProvider, tmp_path: pathlib.Path
++) -> None:
++    """A deleted episode file is dropped on the next listing, with no sync in between."""
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()):
++        [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    (tmp_path / "media" / PODCAST_FOLDER / "episode-02.mp3").unlink()
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        result = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert parse_tags.await_count == 2
++    assert [x.item_id for x in result] == [
++        f"{PODCAST_FOLDER}/episode-01.mp3",
++        f"{PODCAST_FOLDER}/episode-03.mp3",
++    ]
++
++
++async def test_touched_file_invalidates_cache(
++    provider: LocalFileSystemProvider, tmp_path: pathlib.Path
++) -> None:
++    """A file whose modification time changed is re-parsed on the next listing."""
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()):
++        [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    episode_file = tmp_path / "media" / PODCAST_FOLDER / "episode-02.mp3"
++    # the signature uses whole-second mtimes, so move it well clear of the original
++    stat = episode_file.stat()
++    os.utime(episode_file, (stat.st_atime, stat.st_mtime + 120))
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert parse_tags.await_count == 3
++
++
++async def test_resized_file_invalidates_cache(
++    provider: LocalFileSystemProvider, tmp_path: pathlib.Path
++) -> None:
++    """A file whose size changed is re-parsed even if the mtime is restored."""
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()):
++        [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    episode_file = tmp_path / "media" / PODCAST_FOLDER / "episode-02.mp3"
++    stat = episode_file.stat()
++    episode_file.write_bytes(b"dummy audio, but longer")
++    os.utime(episode_file, (stat.st_atime, stat.st_mtime))
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert parse_tags.await_count == 3
++
++
++async def test_empty_folder_yields_nothing_and_is_cached(
++    provider: LocalFileSystemProvider,
++    tmp_path: pathlib.Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """An empty podcast folder lists nothing, is a cache hit next time, and stays not-found."""
++    (tmp_path / "media" / "Empty Podcast").mkdir()
++    writes = 0
++    original_set = provider.mass.cache.set
++
++    async def _counting_set(*args: Any, **kwargs: Any) -> None:
++        nonlocal writes
++        if kwargs.get("category") == CACHE_CATEGORY_PODCAST_EPISODES:
++            writes += 1
++        await original_set(*args, **kwargs)
++
++    monkeypatch.setattr(provider.mass.cache, "set", _counting_set)
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        assert [x async for x in provider.get_podcast_episodes("Empty Podcast")] == []
++        assert [x async for x in provider.get_podcast_episodes("Empty Podcast")] == []
++    parse_tags.assert_not_awaited()
++    # an empty listing is still a real cache entry, so a hit has to be told from a miss by
++    # presence and not by truthiness: only the first call may write. Counting parses cannot
++    # see this - an empty folder has nothing to parse either way
++    assert writes == 1
++
++    with pytest.raises(MediaNotFoundError):
++        await provider.get_podcast("Empty Podcast")
++
++
++async def test_missing_folder_raises(provider: LocalFileSystemProvider) -> None:
++    """A podcast folder that does not exist fails rather than caching an empty listing."""
++    with pytest.raises(FileNotFoundError):
++        [x async for x in provider.get_podcast_episodes("No Such Podcast")]
++
++
++async def test_refresh_bypasses_cache(
++    provider: LocalFileSystemProvider, mass_minimal: MusicAssistant
++) -> None:
++    """A forced refresh (music/refresh_item) re-reads the folder instead of using the cache."""
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()):
++        [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        async with mass_minimal.cache.handle_refresh(True):
++            [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert parse_tags.await_count == 3
++
++
++async def test_partial_listing_is_cached_only_briefly(
++    provider: LocalFileSystemProvider, tmp_path: pathlib.Path
++) -> None:
++    """
++    One unreadable file keeps the rest of the listing, cached under a short expiration.
++
++    Storing nothing at all would mean a permanently corrupt file re-parses every other file
++    in the folder on every single request, for as long as it sits there - the cost this cache
++    exists to remove, silently withheld from the one user who most needs it. The entry is kept
++    instead, short lived because the dropped episode cannot reappear before it expires.
++    """
++    expirations: list[int | None] = []
++    original_set = provider.mass.cache.set
++
++    async def _spy_set(*args: Any, **kwargs: Any) -> Any:
++        if kwargs.get("category") == CACHE_CATEGORY_PODCAST_EPISODES:
++            expirations.append(kwargs.get("expiration"))
++        return await original_set(*args, **kwargs)
++
++    def _side_effect(path: str, _size: int | None = None) -> AudioTags:
++        if path.endswith("episode-02.mp3"):
++            raise InvalidDataError("Unable to parse file")
++        return _audio_tags(path)
++
++    with (
++        patch.object(provider.mass.cache, "set", _spy_set),
++        patch(PARSE_TAGS_TARGET, new=AsyncMock(side_effect=_side_effect)) as parse_tags,
++    ):
++        partial = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++    assert parse_tags.await_count == 3
++    assert [x.item_id for x in partial] == [
++        f"{PODCAST_FOLDER}/episode-01.mp3",
++        f"{PODCAST_FOLDER}/episode-03.mp3",
++    ]
++    # not the year a complete listing gets, or the missing episode would be hidden for it
++    assert expirations == [PARTIAL_LISTING_CACHE_EXPIRATION]
++
++    # the readable files are served from the cache rather than parsed again
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        cached = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++    parse_tags.assert_not_awaited()
++    assert len(cached) == 2
++
++    # the folder signature still recovers the listing ahead of that expiration: a file that
++    # becomes readable by being rewritten moves the signature and re-parses immediately
++    (tmp_path / "media" / PODCAST_FOLDER / "episode-02.mp3").write_bytes(b"dummy audio fixed")
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        recovered = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++    assert parse_tags.await_count == 3
++    assert len(recovered) == 3
++
++
++async def test_cached_episode_survives_serialization(provider: LocalFileSystemProvider) -> None:
++    """Everything the players and UI need survives the cache round trip."""
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy(chapters=True)):
++        [fresh, *_] = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy(chapters=True)) as parse_tags:
++        [cached, *_] = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++    # the second listing has to come out of the cache, otherwise everything below would
++    # compare two freshly parsed episodes and prove nothing about serialization
++    parse_tags.assert_not_awaited()
++
++    # the scalar fields are covered by the to_dict() comparison in the cache hit test;
++    # what needs its own assertions is what a wrong deserialization would silently produce
++    assert isinstance(cached, PodcastEpisode)
++    assert [x.name for x in cached.metadata.chapters or []] == ["Intro", "Outro"]
++    # the podcast attribute is a Podcast | ItemMapping union: it must resolve to Podcast,
++    # because get_podcast() reads the parent podcast straight off a listed episode
++    assert isinstance(cached.podcast, Podcast)
++    assert isinstance(fresh.podcast, Podcast)
++    assert cached.podcast.publisher == "ACME Radio"
++    assert (
++        next(iter(cached.provider_mappings)).audio_format
++        == next(iter(fresh.provider_mappings)).audio_format
++    )
++
++
++async def test_get_podcast_uses_cached_listing(provider: LocalFileSystemProvider) -> None:
++    """get_podcast reads the parent podcast off the cached listing without parsing files."""
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()):
++        [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()) as parse_tags:
++        podcast = await provider.get_podcast(PODCAST_FOLDER)
++
++    parse_tags.assert_not_awaited()
++    assert isinstance(podcast, Podcast)
++    assert podcast.name == PODCAST_FOLDER
++
++
++async def test_no_resume_state_is_cached(provider: LocalFileSystemProvider) -> None:
++    """Resume info applied to a listed episode never ends up in the provider cache."""
++    with patch(PARSE_TAGS_TARGET, new=_parse_tags_spy()):
++        episodes = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++        # the controller applies per-user resume info to the objects the provider yields
++        for episode in episodes:
++            episode.fully_played = True
++            episode.resume_position_ms = 120000
++
++        cached = [x async for x in provider.get_podcast_episodes(PODCAST_FOLDER)]
++
++    assert len(cached) == 3
++    assert all(x.fully_played is None for x in cached)
++    assert all(not x.resume_position_ms for x in cached)
+diff --git a/tests/providers/filesystem_local/test_helpers.py b/tests/providers/filesystem_local/test_helpers.py
+index 573537a4ec..d556a5de35 100644
+--- a/tests/providers/filesystem_local/test_helpers.py
++++ b/tests/providers/filesystem_local/test_helpers.py
+@@ -2,7 +2,29 @@
+ 
+ from pathlib import Path
+ 
+-from music_assistant.providers.filesystem_local.helpers import sorted_scandir
++from music_assistant.providers.filesystem_local.helpers import (
++    FileSystemItem,
++    get_folder_signature,
++    sorted_scandir,
++)
++
++
++def _file_item(name: str, checksum: str = "1700000000", file_size: int = 1024) -> FileSystemItem:
++    """
++    Build a FileSystemItem for a file, without touching the filesystem.
++
++    :param name: Relative path of the file.
++    :param checksum: Last modified time of the file.
++    :param file_size: Size of the file in bytes.
++    """
++    return FileSystemItem(
++        filename=name.rsplit("/", 1)[-1],
++        relative_path=name,
++        absolute_path=f"/media/{name}",
++        is_dir=False,
++        checksum=checksum,
++        file_size=file_size,
++    )
+ 
+ 
+ def test_sorted_scandir_natural_order(tmp_path: Path) -> None:
+@@ -32,3 +54,26 @@ def test_sorted_scandir_unsorted_by_default(tmp_path: Path) -> None:
+     result = sorted_scandir(str(tmp_path), str(tmp_path))
+ 
+     assert sorted(item.filename for item in result) == ["a.flac", "b.flac"]
++
++
++def test_folder_signature_ignores_item_order() -> None:
++    """The same set of files always produces the same signature."""
++    items = [_file_item("pod/ep1.mp3"), _file_item("pod/ep2.mp3")]
++
++    assert get_folder_signature(items) == get_folder_signature(list(reversed(items)))
++
++
++def test_folder_signature_detects_changes() -> None:
++    """Adding, removing, replacing or retagging a file changes the signature."""
++    items = [_file_item("pod/ep1.mp3"), _file_item("pod/ep2.mp3")]
++    signature = get_folder_signature(items)
++
++    assert get_folder_signature([*items, _file_item("pod/ep3.mp3")]) != signature
++    assert get_folder_signature(items[:1]) != signature
++    # same number of files, but one of them replaced, retagged or renamed
++    for changed in (
++        _file_item("pod/ep2.mp3", checksum="1800000000"),
++        _file_item("pod/ep2.mp3", file_size=2048),
++        _file_item("pod/renamed.mp3"),
++    ):
++        assert get_folder_signature([items[0], changed]) != signature

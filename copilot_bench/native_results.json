@@ -1,0 +1,506 @@
+{
+  "summary": "Run the native Sage agent (ohf-sage.md + full corpus grep) as a PR reviewer over the same 6 held-out diffs, apples-to-apples vs the Copilot skill",
+  "agentCount": 6,
+  "logs": [],
+  "result": [
+    {
+      "idx": 4,
+      "src": "server#3002",
+      "review": {
+        "findings": [
+          {
+            "severity": "CRITICAL",
+            "issue": "provider.py wraps every parse loop (search, get_album_tracks, get_playlist_tracks, get_artist_albums, get_artist_toptracks, and all get_library_* generators) in `except Exception as err: self.logger.debug(...)` and continues. This is both a broad/bare-except violation and silent error-swallowing at debug level, hiding real bugs and malformed data.",
+            "path": "music_assistant/providers/yandex_music/provider.py",
+            "principle": "MUST catch specific, expected exception types — no broad or bare except; and MUST never silently swallow errors or anomalous data (don't collapse failures into a debug log and continue).",
+            "citation_url": "https://github.com/music-assistant/server/pull/3096#discussion_r2768368356",
+            "from_corpus": false
+          },
+          {
+            "severity": "CRITICAL",
+            "issue": "get_config_entries() hardcodes every user-facing label and description ('You are authenticated with Yandex Music', 'Audio quality', 'Reset authentication', the multi-step token instructions, etc.) directly in ConfigEntry objects, and no strings.json ships with the provider. The pre-commit hook fails when a ConfigEntry hardcodes label/description text instead of using strings.json.",
+            "path": "music_assistant/providers/yandex_music/__init__.py",
+            "principle": "MUST route all user-facing labels, descriptions, and typed error messages through strings.json / a translation_key (English source), never hardcoding display text.",
+            "citation_url": "https://github.com/music-assistant/server/pull/4462#discussion_r3486751116",
+            "from_corpus": false
+          },
+          {
+            "severity": "CRITICAL",
+            "issue": "Private methods are placed above public ones: api_client.py defines `_ensure_connected` before the public library/search/get methods, and provider.py defines `_get_provider_item_id` above the public `get_stream_details`. The pre-commit hook fails when a class puts a public/dunder method below a private one.",
+            "path": "music_assistant/providers/yandex_music/api_client.py",
+            "principle": "MUST order file/class contents public (and dunder) methods first, private/helper methods at the bottom.",
+            "citation_url": "https://github.com/music-assistant/server/pull/4015#discussion_r3428284831",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "issue": "YandexMusicClient constructs `ClientAsync(self._token).init()`, which creates and owns its own aiohttp ClientSession per provider instance rather than reusing the shared global session. Providers must never spin up their own ClientSession; external HTTP should go through self.mass.http_session.",
+            "path": "music_assistant/providers/yandex_music/api_client.py",
+            "principle": "MUST reuse the shared global aiohttp session (self.mass.http_session); never create a new ClientSession per request or per provider.",
+            "citation_url": "https://github.com/music-assistant/server/pull/1817#discussion_r1903244819",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "issue": "api_client single-item/streaming methods (get_track, get_tracks, get_album, get_playlist, get_track_download_info, and every like_/unlike_ method) catch NetworkError/BadRequestError and collapse them into None, [], or False. A transient network failure becomes indistinguishable from 'not found' (streaming then raises MediaNotFoundError for what was really a network error), and library edits silently report False on API failure.",
+            "path": "music_assistant/providers/yandex_music/api_client.py",
+            "principle": "MUST never silently swallow errors — let it propagate or raise; don't collapse failures into a bool, None, or a silent default (raise from MA's typed exception hierarchy instead).",
+            "citation_url": "https://github.com/music-assistant/server/pull/3722#discussion_r3106867386",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "issue": "streaming.py _get_content_type() defaults any unknown codec to ContentType.MP3, and get_stream_details puts that guessed content_type on the StreamDetails audio_format that drives playback. A wrong-but-plausible codec on streamdetails can corrupt the playback pipeline; unknown codecs should be ContentType.UNKNOWN, not guessed.",
+            "path": "music_assistant/providers/yandex_music/streaming.py",
+            "principle": "MUST keep StreamDetails audio-quality fields (codec, bit depth, sample rate) accurate since they drive playback — set ContentType.UNKNOWN rather than guess wrong.",
+            "citation_url": "https://github.com/music-assistant/server/pull/626#discussion_r1168251023",
+            "from_corpus": false
+          },
+          {
+            "severity": "SUGGESTION",
+            "issue": "The provider decorates get_artist/get_album/get_track/get_playlist (single media-item lookups) with @use_cache. External-API lookups may use @use_cache, but caching the parsed media items themselves is the core controllers' job — providers shouldn't cache media items, which risks double-caching and stale-item bugs. Reserve provider-level @use_cache for raw external lookups.",
+            "path": "music_assistant/providers/yandex_music/provider.py",
+            "principle": "MUST route external-API lookups through MA's cache with a per-method TTL; providers don't hand-roll caching and don't cache media items themselves (the core controllers own that).",
+            "citation_url": "https://github.com/music-assistant/server/pull/586#discussion_r1150074534",
+            "from_corpus": false
+          },
+          {
+            "severity": "SUGGESTION",
+            "issue": "The 'Audio quality' (High/Lossless) selector is exposed as a user-facing config option. MA prefers a sane default (or auto-selecting the best available quality the account supports) over adding a toggle; question whether this option is needed rather than defaulting to a config entry.",
+            "path": "music_assistant/providers/yandex_music/__init__.py",
+            "principle": "Prefer sane defaults over user-facing config options; question whether each toggle is needed.",
+            "citation_url": "https://github.com/music-assistant/server/pull/2968#discussion_r2689481287",
+            "from_corpus": false
+          },
+          {
+            "severity": "SUGGESTION",
+            "issue": "constants.py declares several symbols with no consumer in the diff (CONF_ACTION_AUTH, LABEL_TOKEN, LABEL_AUTH_INSTRUCTIONS, IMAGE_SIZE_SMALL, IMAGE_SIZE_MEDIUM, CACHE_TTL_ARTIST/ALBUM/PLAYLIST). Speculative/unused scaffolding should be dropped in favor of the simplest code the provider actually uses.",
+            "path": "music_assistant/providers/yandex_music/constants.py",
+            "principle": "Prefer the simplest solution that works and avoid speculative flexibility / abstractions with no real consumer.",
+            "citation_url": "https://github.com/music-assistant/server/pull/3386#discussion_r3103034197",
+            "from_corpus": false
+          }
+        ],
+        "verdict": "Won't be accepted as-is: a solid new Yandex Music provider, but it trips three hard/enforced MUSTs (broad-except-and-swallow across every parse loop, hardcoded ConfigEntry labels instead of strings.json, and private-above-public method ordering) plus per-provider aiohttp session creation, error-collapsing in the API client, and streamdetails codec guessing that must be fixed before merge."
+      }
+    },
+    {
+      "idx": 0,
+      "src": "server#3334",
+      "review": {
+        "verdict": "A well-structured new Samsung WAM player provider, but not accepted as-is: it has MUST violations (broad exception catching, an unmanaged fire-and-forget task) plus several should-fix issues (always-on polling, reaching into pywam internals, a hacky log-suppression workaround, single-consumer over-abstraction, and a placeholder manifest documentation URL).",
+        "findings": [
+          {
+            "severity": "CRITICAL",
+            "path": "music_assistant/providers/samsung_wam/features/discovery/handler.py",
+            "issue": "`_setup_player` (except Exception as err) and `_periodic_probe_task` (except Exception as err) catch bare/broad Exception. `_setup_player` also merely logs a warning and returns, so any real setup bug is caught and effectively swallowed rather than surfaced.",
+            "principle": "MUST catch specific, expected exception types — no broad/bare except, which hides real bugs; and MUST never silently swallow errors.",
+            "citation_url": "https://github.com/music-assistant/server/pull/3096#discussion_r2768368356",
+            "from_corpus": false
+          },
+          {
+            "severity": "CRITICAL",
+            "path": "music_assistant/providers/samsung_wam/player.py",
+            "issue": "`on_config_updated` fires `self.mass.create_task(self.device_config.set_name(new_name))` with no stored reference, no tracking/cancel on unload, and no done-callback, so any exception from the rename command is silently lost.",
+            "principle": "MUST manage background asyncio tasks: keep a reference to create_task, track and cancel on unload, and give a done-callback so failures surface.",
+            "citation_url": "https://github.com/music-assistant/server/pull/3492#discussion_r3051739796",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/samsung_wam/player.py",
+            "issue": "WamPlayer sets `_attr_needs_poll = True` with a fixed 30s `_attr_poll_interval` and runs a health-check poll unconditionally, even though it already subscribes to pywam speaker events. Hardware is polled at all times, not only while actively playing.",
+            "principle": "MUST stay event-driven — rely on events/announcements and poll hardware adaptively only when actively playing.",
+            "citation_url": "https://github.com/music-assistant/server/pull/2810#discussion_r2620775575",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/samsung_wam/features/state_sync/mapper.py",
+            "issue": "`create_speaker_attributes` reads `raw._playstatus`, a private attribute of the pywam library object, and `state_sync/handler.py` monkey-patches `speaker.events.event_SpeakerStatus`. Both depend on brittle library internals that can break on any pywam update.",
+            "principle": "Do not reach into a dependency's private attributes/internals directly — maintainers repeatedly reject this as brittle.",
+            "citation_url": "https://github.com/music-assistant/server/pull/3900#discussion_r3255769015",
+            "from_corpus": true
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/samsung_wam/__init__.py",
+            "issue": "`setup()` suppresses SpeakerStatus log spam by installing a global logging.Filter on the `pywam.events` logger, calling setLevel on several third-party loggers, and (in state_sync) monkey-patching the event handler — a workaround layered three ways instead of addressing the noise at its source or via normal log configuration.",
+            "principle": "MUST fix a problem at its root cause, not with a hacky workaround.",
+            "citation_url": "https://github.com/music-assistant/server/pull/2997#issuecomment-3799464615",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/samsung_wam/features/base.py",
+            "issue": "Each command family is a separate handler class in its own file over shared base classes — e.g. VolumeHandler (two one-line methods) and DeviceConfigHandler (a single set_name method). This adds indirection for logic with only one real consumer.",
+            "principle": "Prefer not introducing an abstraction (helper class, separate file) for logic with only one real consumer; keep the solution simple and avoid speculative structure.",
+            "citation_url": "https://github.com/music-assistant/server/pull/3386#discussion_r3103034197",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/samsung_wam/manifest.json",
+            "issue": "The manifest ships with `\"documentation\": \"URL_TO_DOCUMENTATION\"`, an unfilled placeholder rather than a real documentation URL.",
+            "principle": "MUST have every provider manifest.json declare its mandatory keys and stay internally consistent (mechanically enforced).",
+            "citation_url": "https://github.com/music-assistant/server/blob/HEAD/.pre-commit-config.yaml",
+            "from_corpus": false
+          },
+          {
+            "severity": "SUGGESTION",
+            "path": "music_assistant/providers/samsung_wam/features/base.py",
+            "issue": "The provider hand-rolls timing/retry logic: `retry_command` does its own asyncio.sleep exponential backoff, discovery's `_periodic_probe_task` is a raw `while ... asyncio.sleep(PROBE_INTERVAL)` loop, and `player.await_state_change` reimplements a wait-for-condition helper.",
+            "principle": "Prefer the built-in task scheduler (mass.call_later), the built-in debouncer, and wait_for_state helpers over hand-rolled timers/sleep loops.",
+            "citation_url": "https://github.com/music-assistant/server/pull/2758#discussion_r2594785911",
+            "from_corpus": false
+          },
+          {
+            "severity": "SUGGESTION",
+            "path": "music_assistant/providers/samsung_wam/player.py",
+            "issue": "Several methods use nested if/else where an early guard/return would be clearer, e.g. `on_config_updated` (nested `if new_name:` / `if self.connected:`) and discovery's `handle_discovery_event`.",
+            "principle": "Prefer early guard clauses / returns over nested if/else blocks.",
+            "citation_url": "https://github.com/music-assistant/server/pull/2180#discussion_r2078576454",
+            "from_corpus": false
+          }
+        ]
+      }
+    },
+    {
+      "idx": 2,
+      "src": "server#3776",
+      "review": {
+        "findings": [
+          {
+            "severity": "CRITICAL",
+            "path": "music_assistant/providers/airplay/protocols/airplay2.py",
+            "issue": "The new _session_established() method logs with f-strings: logger.info(f\"Streaming session established in {self._session_establishment_ms}ms...\") and logger.warning(f\"Configured value of {...}...\"). MA requires %s-style positional logging arguments, never f-strings, inside logger calls. (These lines also exceed the enforced Ruff line-length of 100.)",
+            "principle": "MUST use %s-style positional logging arguments, not f-strings, inside logger calls.",
+            "citation_url": "https://github.com/music-assistant/server/pull/3147#discussion_r2811140616",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/airplay/protocols/airplay2.py",
+            "issue": "Bare string-literals are used as comments rather than # comments: inside the `if self._connected_ts is not None:` guard sits `\"\"\"We have previously connected, so we ignore this call\"\"\"` as a no-op statement. Comments should use # and explain complex blocks; a non-docstring string statement will also trip Ruff (select=[\"ALL\"], B018 useless-expression).",
+            "principle": "MUST write caller-facing docstrings and only use # comments to explain complex multi-line blocks describing current behavior; pass Ruff with select=[\"ALL\"].",
+            "citation_url": "https://github.com/music-assistant/server/blob/HEAD/AGENTS.md",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/airplay/player.py",
+            "issue": "The reworked ConfigEntry for CONF_SESSION_ESTABLISHMENT_LATENCY hardcodes its label (\"Expected milliseconds to establish streaming session...\") and multi-line description directly instead of routing them through strings.json / a translation_key. The AirPlay2 ALERT ConfigEntry label is likewise hardcoded. This is an enforced pre-commit rule (pre-existing pattern in this provider, but the change edits these exact strings).",
+            "principle": "MUST route all user-facing labels, descriptions, and typed error messages through strings.json / a translation_key, never hardcoding display text.",
+            "citation_url": "https://github.com/music-assistant/server/pull/4462#discussion_r3486751116",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/airplay/player.py",
+            "issue": "The change introduces a user-tunable session_establishment_latency knob as an admitted interim band-aid for a not-understood AirPlay2 timing/sync problem (docstrings say \"The exact reasoning for this is not yet understood and it seems counter intuitive\" and \"It will be removed when a robust synchronisation method is implemented\"). This tunes around the symptom rather than fixing the root cause in the AirPlay2 binary / timing layer.",
+            "principle": "MUST fix a problem at its root cause and correct owning location, not with a workaround.",
+            "citation_url": "https://github.com/music-assistant/server/pull/2997#issuecomment-3799464615",
+            "from_corpus": false
+          },
+          {
+            "severity": "SUGGESTION",
+            "path": "music_assistant/providers/airplay/protocols/airplay2.py",
+            "issue": "_recommended_session_establishment_latency() encodes empirically-derived magic offsets (high rounded up to nearest 100, low = high-600) whose logic the author states is not understood and counter-intuitive, then warns users when their config falls outside that window. This is complex, hard-to-maintain tuning heuristics exposed to end users; a sane fixed default (or no user knob) would be simpler.",
+            "principle": "Prefer the simplest solution that works and keep code simple/maintainable; prefer sane defaults over user-facing config options rather than exposing technical tuning knobs.",
+            "citation_url": "https://github.com/music-assistant/server/pull/2968#discussion_r2689481287",
+            "from_corpus": false
+          },
+          {
+            "severity": "SUGGESTION",
+            "path": "music_assistant/providers/airplay/protocols/airplay2.py",
+            "issue": "_log_cli_output strips a fixed 31-character prefix from every cliap2 stderr line (line[31:]) to remove the binary's timestamp/loglevel. This hardcoded slice silently corrupts log output if the bundled binary's log format width ever changes (the binaries are updated in this same PR).",
+            "principle": "Prefer the simplest robust solution and avoid brittle hardcoded assumptions; keep AI-assisted code simple and human-maintainable.",
+            "citation_url": "https://github.com/music-assistant/server/pull/4919#issuecomment-5083478791",
+            "from_corpus": false
+          }
+        ],
+        "verdict": "Needs changes before it would be accepted: one hard MUST violation (f-string logging), plus a root-cause concern (an admittedly-interim latency knob tuning around an unresolved AirPlay2 timing bug), hardcoded ConfigEntry label/description that should live in strings.json, and a string-literal-as-comment that also risks the Ruff ALL gate."
+      }
+    },
+    {
+      "idx": 3,
+      "src": "server#2688",
+      "review": {
+        "verdict": "Acceptable and single-purpose, but fix the unguarded source_obj.titles[\"primary\"] dict access (KeyError risk) before merge.",
+        "findings": [
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/bbc_sounds/adaptor.py",
+            "issue": "The `elif source_obj.titles:` branch does `title = source_obj.titles[\"primary\"]`, a direct dict-key access guarded only by the dict's truthiness. A non-empty `titles` dict that lacks a \"primary\" key raises KeyError, crashing get_stream_details. Use `source_obj.titles.get(\"primary\", \"\")` (or validate the key exists).",
+            "principle": "Guard direct dict-key access that depends on external/provider-shaped data; check the key exists or use .get() with a fallback to prevent KeyErrors.",
+            "from_corpus": true,
+            "citation_url": "https://github.com/music-assistant/server/pull/3171#discussion_r2813526781"
+          },
+          {
+            "severity": "SUGGESTION",
+            "path": "music_assistant/providers/bbc_sounds/adaptor.py",
+            "issue": "The new title chain treats `episode.metadata` as possibly None (`elif episode.metadata and episode.metadata.description:`), but the following line `if episode.metadata.images:` still dereferences `episode.metadata` unconditionally, which would AttributeError when metadata is None. The crashing line is pre-existing/adjacent, but the change now assumes metadata can be None on this path, so the two should be consistent (guard the images access too).",
+            "principle": "Guard for empty/missing state before dereferencing rather than letting it crash; the change itself introduces the None assumption, so keep the adjacent access consistent.",
+            "from_corpus": true,
+            "citation_url": "https://github.com/music-assistant/server/pull/1419#discussion_r1662144385"
+          }
+        ]
+      }
+    },
+    {
+      "idx": 9,
+      "src": "server#3434",
+      "review": {
+        "verdict": "Mergeable AirPlay bug-fix (combine pairing flags, protocol fallback, interface resolution), but before merge: swap the Python built-in RuntimeError/TypeError raises for MA typed exceptions (or keep them as type-checker asserts), and add a log to the two silent exception suppressions so malformed data isn't dropped unnoticed.",
+        "findings": [
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/airplay/protocols/airplay2.py",
+            "issue": "The former type-checker asserts were replaced with Python built-in exceptions: `raise RuntimeError(...)` for missing airplay_discovery_info and `raise TypeError(...)` for a bad sync_adjust (and `raise RuntimeError` for missing raop_discovery_info in raop.py). MA requires failures to be raised from its own typed exception hierarchy, not Python built-ins.",
+            "principle": "MUST raise from MA's own typed exception hierarchy (SetupFailedError, ProviderUnavailableError, MediaNotFoundError, ...) rather than Python built-in exceptions.",
+            "citation_url": "https://github.com/music-assistant/server/pull/3900#discussion_r3255835790",
+            "from_corpus": false
+          },
+          {
+            "severity": "SUGGESTION",
+            "path": "music_assistant/providers/airplay/protocols/raop.py",
+            "issue": "The lines removed here (and in airplay2.py) were `assert ... is not None  # for type checker` guards. If these conditions are truly unreachable type-checker guards, MA's idiom is to keep them as a plain `assert ... # guard for type checker` rather than converting them to runtime raises; if they are genuinely reachable, they should raise a typed MA exception. Either way, built-in RuntimeError/TypeError is the wrong choice.",
+            "principle": "MA convention: use `assert X is not None  # guard for type checker` for pure type-checker invariants (marcelveldt review precedent).",
+            "citation_url": "https://github.com/music-assistant/server/pull/2329#discussion_r2279760635",
+            "from_corpus": true
+          },
+          {
+            "severity": "SUGGESTION",
+            "path": "music_assistant/providers/airplay/player.py",
+            "issue": "In `_get_flags`, `contextlib.suppress(ValueError, TypeError)` silently drops a malformed `sf`/`flags` value and contributes 0 to the OR. The method's own comment notes that missing a source 'misses the pairing requirement', so silently zeroing a malformed source could cause MA to skip a required pairing without any trace. Suppressing specific exceptions is accepted MA style, but log the anomalous value at debug rather than swallowing it entirely.",
+            "principle": "MUST never silently swallow anomalous data into a silent default; let it surface (here: at least log it).",
+            "citation_url": "https://github.com/music-assistant/server/pull/3722#discussion_r3106867386",
+            "from_corpus": false
+          },
+          {
+            "severity": "SUGGESTION",
+            "path": "music_assistant/providers/airplay/helpers.py",
+            "issue": "`_routing_lookup` catches `OSError` with a bare `pass` and returns an empty string. The routing probe failing is exactly the case worth a debug log before falling through to publish_ip/bind_ip; swallowing it with no trace makes interface-selection problems hard to diagnose.",
+            "principle": "MUST never silently swallow errors; log/surface them instead of a bare pass into a default.",
+            "citation_url": "https://github.com/music-assistant/server/pull/1214#discussion_r1557137671",
+            "from_corpus": false
+          }
+        ]
+      }
+    },
+    {
+      "idx": 10,
+      "src": "server#1799",
+      "review": {
+        "findings": [
+          {
+            "severity": "CRITICAL",
+            "path": "music_assistant/providers/ibroadcast/__init__.py",
+            "issue": "handle_async_init creates a brand-new `aiohttp.ClientSession()` (line 117) and hands it to IBroadcastClient instead of reusing the shared `self.mass.http_session`. It is also opened in an `async with` block, so the session is closed the moment init returns while `self._client` keeps using it.",
+            "principle": "MUST reuse the shared global aiohttp session (self.mass.http_session); never create a new ClientSession per request or per provider.",
+            "citation_url": "https://github.com/music-assistant/server/pull/1817#discussion_r1903244819",
+            "from_corpus": false
+          },
+          {
+            "severity": "CRITICAL",
+            "path": "music_assistant/providers/ibroadcast/__init__.py",
+            "issue": "Per-item API calls inside listing loops (N+1). `_get_tracks` (lines 260-270) calls `get_track` for every id in an album/playlist; `_parse_track` (lines 405-449) calls `get_artist` per artist and `get_album` per track; `_parse_album` (lines 340-357) fetches the artist and artwork per album while iterating `get_library_albums`. Iterating any listing fans out to one API call per element.",
+            "principle": "MUST never make a per-item API/DB call inside a loop over a listing (N+1); batch, reuse already-fetched data, or asyncio.gather independent calls.",
+            "citation_url": "https://github.com/music-assistant/server/pull/3171#discussion_r2813508549",
+            "from_corpus": false
+          },
+          {
+            "severity": "CRITICAL",
+            "path": "music_assistant/providers/ibroadcast/__init__.py",
+            "issue": "The ConfigEntry definitions hardcode `label=\"Username\"` and `label=\"Password\"` (lines 96-97, 102-103) instead of routing display text through strings.json / a translation_key. No strings.json ships with the provider. This is mechanically checked and will fail pre-commit CI.",
+            "principle": "MUST route all user-facing labels, descriptions, and typed error messages through strings.json / a translation_key; never hardcode display text (ConfigEntry label/description).",
+            "citation_url": "https://github.com/music-assistant/server/pull/4462#discussion_r3486751116",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/ibroadcast/__init__.py",
+            "issue": "get_playlist (lines 219-226) catches parse failures, logs at debug, then falls through to `return playlist` — but `playlist` is never assigned on the failure path, so it swallows the real error and raises an UnboundLocalError instead of propagating a typed error. Separately, get_library_tracks (line 193) catches IndexError and silently `continue`s with no logging.",
+            "principle": "MUST never silently swallow errors or anomalous data — let it propagate or raise; don't collapse failures into a bool, None, or a silent default.",
+            "citation_url": "https://github.com/music-assistant/server/pull/1214#discussion_r1557137671",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/ibroadcast/__init__.py",
+            "issue": "get_stream_details hardcodes `content_type=ContentType.MPEG` for every track (lines 253-255), and the album/track ProviderMappings do the same (lines 318, 384-386). iBroadcast stores users' own uploaded files (which can be FLAC/ALAC/etc.), so this guesses the codec rather than reflecting it — StreamDetails audio-quality fields drive playback and must be accurate.",
+            "principle": "MUST keep StreamDetails audio-quality fields (codec, bit depth, sample rate) accurate since they drive playback — set ContentType.UNKNOWN rather than guess wrong.",
+            "citation_url": "https://github.com/music-assistant/server/pull/626#discussion_r1168251023",
+            "from_corpus": false
+          },
+          {
+            "severity": "PROBLEM",
+            "path": "music_assistant/providers/ibroadcast/__init__.py",
+            "issue": "get_artist_albums (line 167) does `albums.append(self._parse_album(album))` with no `await` — `_parse_album` is a coroutine, so the list is filled with un-awaited coroutine objects rather than Album instances (and the surrounding try/except can never catch a parse error because nothing is executed). Marcel has fixed this exact append-without-await pattern in review before.",
+            "principle": "Review-history precedent: maintainer corrected `result.artists.append(item)` to `append(await self._parse_artist(item))` — nested parse calls must be awaited before appending.",
+            "citation_url": "https://github.com/music-assistant/server/pull/566#discussion_r1146497236",
+            "from_corpus": true
+          },
+          {
+            "severity": "SUGGESTION",
+            "path": "music_assistant/providers/ibroadcast/__init__.py",
+            "issue": "_parse_album (lines 343-344) calls `await self._client.get_artist(album_obj[\"artist_id\"])` twice in a single expression (once for the value, once for the truthiness guard), doubling the API round-trips. Fetch once into a local and reuse it.",
+            "principle": "MUST never make redundant per-item API calls; reuse already-fetched data instead of re-calling the API.",
+            "citation_url": "https://github.com/music-assistant/server/pull/2501#discussion_r2429740886",
+            "from_corpus": false
+          },
+          {
+            "severity": "SUGGESTION",
+            "path": "music_assistant/providers/ibroadcast/__init__.py",
+            "issue": "Docstrings are one-line summaries without Sphinx `:param:` syntax; the server repo mandates Sphinx-style docstrings with the summary on its own next line and `:param:` for arguments (e.g. get_config_entries documents its params in prose rather than `:param:` form).",
+            "principle": "MUST write Sphinx-style docstrings with :param: syntax; no Google-style or bullet-style.",
+            "citation_url": "https://github.com/music-assistant/server/blob/HEAD/AGENTS.md",
+            "from_corpus": false
+          }
+        ],
+        "verdict": "Won't be accepted as-is: a new iBroadcast provider with four MUST-level violations — creating its own aiohttp ClientSession instead of self.mass.http_session, pervasive N+1 API calls in listing loops, hardcoded ConfigEntry labels (will fail CI), and error-swallowing — plus inaccurate hardcoded StreamDetails codec and a missing-await bug."
+      }
+    }
+  ],
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Review"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "native:server#3002",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "aaa8d388411694618",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785450973302,
+      "queuedAt": 1785450969690,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Won't be accepted as-is: a solid new Yandex Music provider,…",
+      "promptPreview": "You are the OHF Sage — the distilled voice of the Music Assistant project leads' engineering principles. Your task is to review a pull-request diff against those principles.\n\n1. Read your full operating instructions and embedded, permalinked principles from `agent/ohf-sage.md` (in the current working directory).\n2. Read the diff to review from `copilot_bench/diffs/case_4.diff`.\n3. Review the diff …",
+      "lastProgressAt": 1785451111158,
+      "tokens": 95040,
+      "toolCalls": 4,
+      "durationMs": 137856,
+      "resultPreview": "{\"findings\":[{\"severity\":\"CRITICAL\",\"issue\":\"provider.py wraps every parse loop (search, get_album_tracks, get_playlist_tracks, get_artist_albums, get_artist_toptracks, and all get_library_* generators) in `except Exception as err: self.logger.debug(...)` and continues. This is both a broad/bare-except violation and silent error-swallowing at debug level, hiding real bugs and malformed data.\",\"pat…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "native:server#3334",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a7a5d140574eb2622",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785450972172,
+      "queuedAt": 1785450969690,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "A well-structured new Samsung WAM player provider, but not …",
+      "promptPreview": "You are the OHF Sage — the distilled voice of the Music Assistant project leads' engineering principles. Your task is to review a pull-request diff against those principles.\n\n1. Read your full operating instructions and embedded, permalinked principles from `agent/ohf-sage.md` (in the current working directory).\n2. Read the diff to review from `copilot_bench/diffs/case_0.diff`.\n3. Review the diff …",
+      "lastProgressAt": 1785451157259,
+      "tokens": 114828,
+      "toolCalls": 8,
+      "durationMs": 185087,
+      "resultPreview": "{\"verdict\":\"A well-structured new Samsung WAM player provider, but not accepted as-is: it has MUST violations (broad exception catching, an unmanaged fire-and-forget task) plus several should-fix issues (always-on polling, reaching into pywam internals, a hacky log-suppression workaround, single-consumer over-abstraction, and a placeholder manifest documentation URL).\",\"findings\":[{\"severity\":\"CRI…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "native:server#3776",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a18b2c874f6a4ac10",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785450971984,
+      "queuedAt": 1785450969691,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Needs changes before it would be accepted: one hard MUST vi…",
+      "promptPreview": "You are the OHF Sage — the distilled voice of the Music Assistant project leads' engineering principles. Your task is to review a pull-request diff against those principles.\n\n1. Read your full operating instructions and embedded, permalinked principles from `agent/ohf-sage.md` (in the current working directory).\n2. Read the diff to review from `copilot_bench/diffs/case_2.diff`.\n3. Review the diff …",
+      "lastProgressAt": 1785451106011,
+      "tokens": 80307,
+      "toolCalls": 6,
+      "durationMs": 134026,
+      "resultPreview": "{\"findings\":[{\"severity\":\"CRITICAL\",\"path\":\"music_assistant/providers/airplay/protocols/airplay2.py\",\"issue\":\"The new _session_established() method logs with f-strings: logger.info(f\\\"Streaming session established in {self._session_establishment_ms}ms...\\\") and logger.warning(f\\\"Configured value of {...}...\\\"). MA requires %s-style positional logging arguments, never f-strings, inside logger calls…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "native:server#2688",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a8097cdcd2295e369",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785450974618,
+      "queuedAt": 1785450969691,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Acceptable and single-purpose, but fix the unguarded source…",
+      "promptPreview": "You are the OHF Sage — the distilled voice of the Music Assistant project leads' engineering principles. Your task is to review a pull-request diff against those principles.\n\n1. Read your full operating instructions and embedded, permalinked principles from `agent/ohf-sage.md` (in the current working directory).\n2. Read the diff to review from `copilot_bench/diffs/case_3.diff`.\n3. Review the diff …",
+      "lastProgressAt": 1785451060224,
+      "tokens": 69502,
+      "toolCalls": 5,
+      "durationMs": 85606,
+      "resultPreview": "{\"verdict\":\"Acceptable and single-purpose, but fix the unguarded source_obj.titles[\\\"primary\\\"] dict access (KeyError risk) before merge.\",\"findings\":[{\"severity\":\"PROBLEM\",\"path\":\"music_assistant/providers/bbc_sounds/adaptor.py\",\"issue\":\"The `elif source_obj.titles:` branch does `title = source_obj.titles[\\\"primary\\\"]`, a direct dict-key access guarded only by the dict's truthiness. A non-empty `…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "native:server#3434",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "af9951c5a089bd808",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785450972497,
+      "queuedAt": 1785450969691,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Mergeable AirPlay bug-fix (combine pairing flags, protocol …",
+      "promptPreview": "You are the OHF Sage — the distilled voice of the Music Assistant project leads' engineering principles. Your task is to review a pull-request diff against those principles.\n\n1. Read your full operating instructions and embedded, permalinked principles from `agent/ohf-sage.md` (in the current working directory).\n2. Read the diff to review from `copilot_bench/diffs/case_9.diff`.\n3. Review the diff …",
+      "lastProgressAt": 1785451094043,
+      "tokens": 73158,
+      "toolCalls": 4,
+      "durationMs": 121546,
+      "resultPreview": "{\"verdict\":\"Mergeable AirPlay bug-fix (combine pairing flags, protocol fallback, interface resolution), but before merge: swap the Python built-in RuntimeError/TypeError raises for MA typed exceptions (or keep them as type-checker asserts), and add a log to the two silent exception suppressions so malformed data isn't dropped unnoticed.\",\"findings\":[{\"severity\":\"PROBLEM\",\"path\":\"music_assistant/pr…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "native:server#1799",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a0fae713d12ccae2b",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1785450972201,
+      "queuedAt": 1785450969691,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Won't be accepted as-is: a new iBroadcast provider with fou…",
+      "promptPreview": "You are the OHF Sage — the distilled voice of the Music Assistant project leads' engineering principles. Your task is to review a pull-request diff against those principles.\n\n1. Read your full operating instructions and embedded, permalinked principles from `agent/ohf-sage.md` (in the current working directory).\n2. Read the diff to review from `copilot_bench/diffs/case_10.diff`.\n3. Review the diff…",
+      "lastProgressAt": 1785451091481,
+      "tokens": 79582,
+      "toolCalls": 5,
+      "durationMs": 119280,
+      "resultPreview": "{\"findings\":[{\"severity\":\"CRITICAL\",\"path\":\"music_assistant/providers/ibroadcast/__init__.py\",\"issue\":\"handle_async_init creates a brand-new `aiohttp.ClientSession()` (line 117) and hands it to IBroadcastClient instead of reusing the shared `self.mass.http_session`. It is also opened in an `async with` block, so the session is closed the moment init returns while `self._client` keeps using it.\",\"p…"
+    }
+  ],
+  "totalTokens": 512417,
+  "totalToolCalls": 32
+}

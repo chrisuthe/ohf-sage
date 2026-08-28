@@ -1,0 +1,582 @@
+diff --git a/music_assistant/controllers/music/media/podcasts.py b/music_assistant/controllers/music/media/podcasts.py
+index 1fb0b140b7..fe2691a0db 100644
+--- a/music_assistant/controllers/music/media/podcasts.py
++++ b/music_assistant/controllers/music/media/podcasts.py
+@@ -18,6 +18,7 @@
+ 
+ from music_assistant.constants import DB_TABLE_PLAYLOG, DB_TABLE_PODCASTS
+ from music_assistant.controllers.webserver.helpers.auth_middleware import get_current_user
++from music_assistant.helpers.audio import get_probed_duration
+ from music_assistant.helpers.compare import (
+     compare_media_item,
+     compare_podcast,
+@@ -163,7 +164,9 @@ async def episode(
+         prov = self.mass.get_provider(provider_instance_id_or_domain)
+         if not isinstance(prov, MusicProvider):
+             raise ProviderUnavailableError("Provider not found")
+-        return await prov.get_podcast_episode(item_id)
++        episode = await prov.get_podcast_episode(item_id)
++        await self._restore_probed_duration(episode)
++        return episode
+ 
+     async def versions(
+         self,
+@@ -370,8 +373,20 @@ async def set_resume_position(episode: PodcastEpisode) -> None:
+         # always a rather small list and we want fresh resume info
+         async for item in prov.get_podcast_episodes(item_id):
+             await set_resume_position(item)
++            await self._restore_probed_duration(item)
+             yield item
+ 
++    async def _restore_probed_duration(self, episode: PodcastEpisode) -> None:
++        """
++        Fill in the duration determined during an earlier playback, for feeds that omit it.
++
++        :param episode: The episode to fill the duration of, left untouched when it has one.
++        """
++        if episode.duration or not (uri := episode.uri):
++            return
++        if probed_duration := await get_probed_duration(self.mass, uri):
++            episode.duration = probed_duration
++
+     def _parse_summary_row(self, db_row: Mapping[str, Any]) -> PodcastSummary:
+         """Parse a raw summary db row into a PodcastSummary object."""
+         item = cast("PodcastSummary", super()._parse_summary_row(db_row))
+diff --git a/music_assistant/controllers/player_queues/base.py b/music_assistant/controllers/player_queues/base.py
+index 12fd8d90db..b71aed980d 100644
+--- a/music_assistant/controllers/player_queues/base.py
++++ b/music_assistant/controllers/player_queues/base.py
+@@ -80,5 +80,6 @@ async def load_next_queue_item(self, queue_id: str, current_item_id: str) -> Que
+         async def player_media_from_queue_item(self, queue_item: QueueItem) -> PlayerMedia: ...
+         def _set_transitioning(self, queue_id: str, value: bool) -> None: ...
+         # implemented on QueueLoaderMixin; declared here for the cross-mixin call in PlaybackTracker
++        def _apply_probed_duration(self, queue_item: QueueItem) -> None: ...
+         async def _fill_dynamic_tracks(self, queue_id: str) -> None: ...
+         async def _fill_autoplay_tracks(self, queue_id: str) -> None: ...
+diff --git a/music_assistant/controllers/player_queues/constants.py b/music_assistant/controllers/player_queues/constants.py
+index cb2dfff9e6..14a114c749 100644
+--- a/music_assistant/controllers/player_queues/constants.py
++++ b/music_assistant/controllers/player_queues/constants.py
+@@ -2,6 +2,8 @@
+ 
+ from __future__ import annotations
+ 
++from music_assistant_models.enums import MediaType
++
+ CONF_DEFAULT_ENQUEUE_SELECT_ARTIST = "default_enqueue_select_artist"
+ CONF_DEFAULT_ENQUEUE_SELECT_ALBUM = "default_enqueue_select_album"
+ 
+@@ -80,3 +82,11 @@
+ # Bumped when the on-disk queue cache layout changes in a way older code can't read; a version
+ # mismatch makes the restore fall back to a clean queue instead of trusting incompatible data.
+ CACHE_FORMAT_VERSION = 1
++
++# Media types that may reach us without a duration, so one determined while streaming is applied.
++# Radio and audio sources would wrongly become seekable. Tracks always carry a duration and a
++# rounded value would affect crossfade and gapless timing.
++PROBED_DURATION_MEDIA_TYPES = (
++    MediaType.PODCAST_EPISODE,
++    MediaType.AUDIOBOOK,
++)
+diff --git a/music_assistant/controllers/player_queues/controller.py b/music_assistant/controllers/player_queues/controller.py
+index 8a20474052..d467e448a9 100644
+--- a/music_assistant/controllers/player_queues/controller.py
++++ b/music_assistant/controllers/player_queues/controller.py
+@@ -968,7 +968,17 @@ async def play_index(  # noqa: PLR0915
+                 and (queue_item := self.get_item(queue_id, index))
+                 and (resume_position_ms := getattr(queue_item.media_item, "resume_position_ms", 0))
+             ):
+-                seek_position = max(0, int((resume_position_ms - 500) / 1000))
++                # the client may have fetched the item before its duration was known
++                await self._restore_probed_duration(queue_item)
++                if queue_item.duration or getattr(queue_item.media_item, "duration", 0):
++                    seek_position = max(0, int((resume_position_ms - 500) / 1000))
++                else:
++                    # seeking needs a duration, which is determined while streaming
++                    self.logger.debug(
++                        "Can not resume %s at %ss: its duration is not known (yet)",
++                        queue_item.name,
++                        int(resume_position_ms / 1000),
++                    )
+ 
+             # restore the persisted playback speed for a freshly queued audiobook/episode
+             # (an in-session item already carries its speed in extra_attributes)
+diff --git a/music_assistant/controllers/player_queues/playback_tracker.py b/music_assistant/controllers/player_queues/playback_tracker.py
+index d37d457e6b..b37b1ecf89 100644
+--- a/music_assistant/controllers/player_queues/playback_tracker.py
++++ b/music_assistant/controllers/player_queues/playback_tracker.py
+@@ -607,6 +607,9 @@ def _handle_playback_progress_report(
+             #  Ignore items that had a stream error
+             return
+ 
++        # a preloaded item is only probed once it actually streams
++        self._apply_probed_duration(item_to_report)
++
+         if item_to_report.streamdetails and item_to_report.streamdetails.duration:
+             duration = int(item_to_report.streamdetails.duration)
+         else:
+diff --git a/music_assistant/controllers/player_queues/queue_loader.py b/music_assistant/controllers/player_queues/queue_loader.py
+index 1b94b24ed0..db7986b5d1 100644
+--- a/music_assistant/controllers/player_queues/queue_loader.py
++++ b/music_assistant/controllers/player_queues/queue_loader.py
+@@ -49,6 +49,7 @@
+ from music_assistant.controllers.player_queues.constants import (
+     CONF_DEFAULT_ENQUEUE_OPTION_LIVE_SOURCES,
+     MANAGED_POOL_MAX,
++    PROBED_DURATION_MEDIA_TYPES,
+ )
+ from music_assistant.controllers.player_queues.helpers import (
+     build_queue_item,
+@@ -61,6 +62,7 @@
+     get_current_user,
+     set_current_user,
+ )
++from music_assistant.helpers.audio import get_probed_duration, store_probed_duration
+ from music_assistant.helpers.throttle_retry import BYPASS_THROTTLER
+ 
+ if TYPE_CHECKING:
+@@ -379,9 +381,7 @@ async def _load_item(
+             prefer_album_loudness=bool(playing_album_tracks),
+         )
+         # update queue_item.duration from streamdetails if we got a better value
+-        if queue_item.streamdetails.duration and not queue_item.duration:
+-            queue_item.duration = queue_item.streamdetails.duration
+-            self.signal_update(queue_id, items_changed=True)
++        self._apply_probed_duration(queue_item)
+ 
+         # pre-initialize the AudioBuffer so audio is ready
+         # when the player requests it. For the current/first track this ensures
+@@ -396,6 +396,62 @@ async def _load_item(
+                 wait_ready=True,
+                 reason="prepare",
+             )
++            # the first chunk is in, so the source has been probed and a duration the
++            # provider did not report is known before playback starts
++            self._apply_probed_duration(queue_item)
++
++    def _apply_probed_duration(self, queue_item: QueueItem) -> None:
++        """
++        Apply a duration determined while streaming to the queue item and its media item.
++
++        :param queue_item: The queue item whose streamdetails to take the duration from.
++        """
++        streamdetails = queue_item.streamdetails
++        if streamdetails is None or not streamdetails.duration:
++            return
++        duration = int(streamdetails.duration)
++        if not self._set_missing_duration(queue_item, duration):
++            return
++        if uri := getattr(queue_item.media_item, "uri", None):
++            # store it so listings and later playbacks have it up front
++            self.mass.create_task(store_probed_duration(self.mass, uri, duration))
++
++    async def _restore_probed_duration(self, queue_item: QueueItem) -> None:
++        """
++        Apply the duration determined during an earlier playback to an item that lacks one.
++
++        :param queue_item: The queue item to fill the duration of.
++        """
++        if queue_item.media_type not in PROBED_DURATION_MEDIA_TYPES:
++            return
++        if not (uri := getattr(queue_item.media_item, "uri", None)):
++            return
++        if queue_item.duration and getattr(queue_item.media_item, "duration", None):
++            return
++        if duration := await get_probed_duration(self.mass, uri):
++            self._set_missing_duration(queue_item, duration)
++
++    def _set_missing_duration(self, queue_item: QueueItem, duration: int) -> bool:
++        """
++        Fill in the duration of a queue item and its media item, leaving known ones alone.
++
++        :param queue_item: The queue item to fill the duration of.
++        :param duration: The duration in seconds.
++        :return: True if the item (or its media item) did not have a duration yet.
++        """
++        if queue_item.media_type not in PROBED_DURATION_MEDIA_TYPES:
++            return False
++        media_item = queue_item.media_item
++        # an ItemMapping or any other reference without a duration is left untouched
++        media_item_duration = getattr(media_item, "duration", None)
++        if queue_item.duration and media_item_duration != 0:
++            return False
++        if not queue_item.duration:
++            queue_item.duration = duration
++        if media_item_duration == 0:
++            media_item.duration = duration  # type: ignore[union-attr]
++        self.signal_update(queue_item.queue_id, items_changed=True)
++        return True
+ 
+     def _get_next_index(
+         self,
+diff --git a/music_assistant/controllers/streams/audio.py b/music_assistant/controllers/streams/audio.py
+index c60c3454f2..5cf0c3fb28 100644
+--- a/music_assistant/controllers/streams/audio.py
++++ b/music_assistant/controllers/streams/audio.py
+@@ -361,12 +361,16 @@ async def get_stream_details(
+                     )
+                     streamdetails.stream_metadata_update_interval = 5
+ 
+-        if streamdetails.duration is None:
++        # providers report an unknown duration as either None or 0
++        if not streamdetails.duration:
+             if queue_item.media_item and queue_item.media_item.duration:
+                 streamdetails.duration = queue_item.media_item.duration
+             elif queue_item.duration:
+                 streamdetails.duration = queue_item.duration
+-        if seek_position and (not streamdetails.allow_seek or not streamdetails.duration):
++        if seek_position and not streamdetails.allow_seek:
++            self.logger.warning("seeking is not possible on this stream!")
++            seek_position = 0
++        elif seek_position and not streamdetails.duration:
+             self.logger.warning("seeking is not possible on duration-less streams!")
+             seek_position = 0
+ 
+diff --git a/music_assistant/helpers/audio.py b/music_assistant/helpers/audio.py
+index cbda312013..7407ab1b5b 100644
+--- a/music_assistant/helpers/audio.py
++++ b/music_assistant/helpers/audio.py
+@@ -662,6 +662,52 @@ async def store_content_length_in_cache(
+     )
+ 
+ 
++PROBED_DURATION_CACHE_CATEGORY = 51
++PROBED_DURATION_CACHE_PROVIDER = "audio"
++PROBED_DURATION_CACHE_EXPIRATION = 365 * 86400  # 1 year
++
++
++async def get_probed_duration(mass: MusicAssistant, uri: str) -> int | None:
++    """
++    Get the duration determined during an earlier playback of the given item, if any.
++
++    Use for items whose provider does not report a duration, such as podcast episodes
++    from a feed without itunes:duration.
++
++    :param mass: The MusicAssistant instance (for cache access).
++    :param uri: The media item URI (e.g. "overcast--1://podcast_episode/abc").
++    :return: The duration in seconds, or None if the item was never played.
++    """
++    duration: int | None = await mass.cache.get(
++        uri,
++        provider=PROBED_DURATION_CACHE_PROVIDER,
++        category=PROBED_DURATION_CACHE_CATEGORY,
++    )
++    return duration
++
++
++async def store_probed_duration(mass: MusicAssistant, uri: str, duration: int) -> None:
++    """
++    Store the duration of an item that was determined while streaming it.
++
++    A duration below a second is ignored.
++
++    :param mass: The MusicAssistant instance (for cache access).
++    :param uri: The media item URI (e.g. "overcast--1://podcast_episode/abc").
++    :param duration: The duration in seconds.
++    """
++    if duration < 1:
++        return
++    await mass.cache.set(
++        uri,
++        duration,
++        expiration=PROBED_DURATION_CACHE_EXPIRATION,
++        provider=PROBED_DURATION_CACHE_PROVIDER,
++        category=PROBED_DURATION_CACHE_CATEGORY,
++        persistent=True,
++    )
++
++
+ def get_bit_rate(fmt: AudioFormat) -> int:
+     """Get the (estimated) bit rate for a given AudioFormat, if known."""
+     if fmt.bit_rate:
+diff --git a/tests/controllers/music/test_probed_episode_duration.py b/tests/controllers/music/test_probed_episode_duration.py
+new file mode 100644
+index 0000000000..eb2f3c2970
+--- /dev/null
++++ b/tests/controllers/music/test_probed_episode_duration.py
+@@ -0,0 +1,82 @@
++"""
++Tests for restoring the duration probed during playback onto podcast episodes.
++
++Podcast feeds that omit ``itunes:duration`` yield episodes with a duration of 0. The value
++determined by ffmpeg while streaming is stored per item, so listings and later playbacks do
++not start blind again. These tests use the ``mass`` fixture from ``tests/conftest.py``, which
++provides a full MusicAssistant instance with a real cache database.
++"""
++
++from __future__ import annotations
++
++from music_assistant_models.enums import MediaType
++from music_assistant_models.media_items import ItemMapping, PodcastEpisode, ProviderMapping
++
++from music_assistant.helpers.audio import get_probed_duration, store_probed_duration
++from music_assistant.mass import MusicAssistant
++
++
++def _episode(item_id: str, duration: int = 0) -> PodcastEpisode:
++    return PodcastEpisode(
++        item_id=item_id,
++        provider="test_podcast_prov",
++        name="Episode One",
++        duration=duration,
++        position=1,
++        podcast=ItemMapping(
++            item_id="show-001",
++            provider="test_podcast_prov",
++            name="My Podcast Show",
++            media_type=MediaType.PODCAST,
++        ),
++        provider_mappings={
++            ProviderMapping(
++                item_id=item_id,
++                provider_domain="test_podcast_prov",
++                provider_instance="test_podcast_prov",
++            )
++        },
++    )
++
++
++def _uri(episode: PodcastEpisode) -> str:
++    assert episode.uri is not None  # set in __post_init__
++    return episode.uri
++
++
++async def test_probed_duration_is_restored_on_a_durationless_episode(mass: MusicAssistant) -> None:
++    """An episode without a duration gets the one probed during an earlier playback."""
++    episode = _episode("ep-restore")
++    await store_probed_duration(mass, _uri(episode), 2700)
++
++    await mass.music.podcasts._restore_probed_duration(episode)
++
++    assert episode.duration == 2700
++
++
++async def test_probed_duration_does_not_replace_the_feeds_duration(mass: MusicAssistant) -> None:
++    """A duration published by the feed wins over the probed one."""
++    episode = _episode("ep-keep", duration=2712)
++    await store_probed_duration(mass, _uri(episode), 2700)
++
++    await mass.music.podcasts._restore_probed_duration(episode)
++
++    assert episode.duration == 2712
++
++
++async def test_probed_duration_of_an_unknown_episode_stays_zero(mass: MusicAssistant) -> None:
++    """An episode that was never played keeps its unknown duration."""
++    episode = _episode("ep-unknown")
++
++    await mass.music.podcasts._restore_probed_duration(episode)
++
++    assert episode.duration == 0
++
++
++async def test_zero_duration_is_never_stored(mass: MusicAssistant) -> None:
++    """A probe that produced nothing useful is not written to the store."""
++    episode = _episode("ep-zero")
++
++    await store_probed_duration(mass, _uri(episode), 0)
++
++    assert await get_probed_duration(mass, _uri(episode)) is None
+diff --git a/tests/controllers/player_queues/test_probed_duration.py b/tests/controllers/player_queues/test_probed_duration.py
+new file mode 100644
+index 0000000000..d9d74febad
+--- /dev/null
++++ b/tests/controllers/player_queues/test_probed_duration.py
+@@ -0,0 +1,197 @@
++"""Tests that a duration determined while streaming is applied to the item that is playing."""
++
++from __future__ import annotations
++
++from typing import Any, NamedTuple
++from unittest.mock import AsyncMock, MagicMock, Mock
++
++from music_assistant_models.enums import ContentType, MediaType, StreamType
++from music_assistant_models.media_items import (
++    AudioFormat,
++    ItemMapping,
++    PodcastEpisode,
++    ProviderMapping,
++    Radio,
++)
++from music_assistant_models.queue_item import QueueItem
++from music_assistant_models.streamdetails import StreamDetails
++
++from music_assistant.controllers.player_queues import PlayerQueuesController
++
++QUEUE_ID = "q1"
++EPISODE_URI = "overcast--1://podcast_episode/feed1 ep1"
++
++
++def _await_args(mock: AsyncMock) -> Any:
++    """Return the call a mock was last awaited with, narrowed for the type checker."""
++    assert mock.await_args is not None
++    return mock.await_args
++
++
++class _Harness(NamedTuple):
++    """A bare queue controller with its collaborators kept at their mock types."""
++
++    ctrl: PlayerQueuesController
++    signal_update: Mock
++    create_task: Mock
++    cache_get: AsyncMock
++    cache_set: AsyncMock
++
++    async def stored_duration(self) -> int | None:
++        """Run the fire and forget cache write and return the value it stored."""
++        if not self.create_task.called:
++            return None
++        await self.create_task.call_args[0][0]
++        return int(_await_args(self.cache_set).args[1])
++
++
++def _harness(stored: int | None = None) -> _Harness:
++    ctrl = PlayerQueuesController.__new__(PlayerQueuesController)
++    signal_update = Mock()
++    ctrl.signal_update = signal_update  # type: ignore[method-assign]
++    mass = MagicMock()
++    mass.cache.get = AsyncMock(return_value=stored)
++    mass.cache.set = AsyncMock()
++    ctrl.mass = mass
++    return _Harness(ctrl, signal_update, mass.create_task, mass.cache.get, mass.cache.set)
++
++
++def _streamdetails(media_type: MediaType, duration: int | None) -> StreamDetails:
++    return StreamDetails(
++        provider="overcast--1",
++        item_id="feed1 ep1",
++        audio_format=AudioFormat(content_type=ContentType.MP3),
++        media_type=media_type,
++        stream_type=StreamType.HTTP,
++        duration=duration,
++    )
++
++
++def _provider_mappings(item_id: str, domain: str) -> set[ProviderMapping]:
++    return {
++        ProviderMapping(
++            item_id=item_id,
++            provider_domain=domain,
++            provider_instance=f"{domain}--1",
++        )
++    }
++
++
++def _episode(duration: int = 0) -> PodcastEpisode:
++    return PodcastEpisode(
++        item_id="feed1 ep1",
++        provider="overcast--1",
++        name="Episode One",
++        uri=EPISODE_URI,
++        duration=duration,
++        position=1,
++        podcast=ItemMapping(
++            item_id="feed1",
++            provider="overcast--1",
++            name="Feed One",
++            media_type=MediaType.PODCAST,
++        ),
++        provider_mappings=_provider_mappings("feed1 ep1", "overcast"),
++    )
++
++
++def _radio() -> Radio:
++    return Radio(
++        item_id="r1",
++        provider="radiobrowser--1",
++        name="Radio One",
++        uri="radio://r1",
++        provider_mappings=_provider_mappings("r1", "radiobrowser"),
++    )
++
++
++def _queue_item(media_item: Any, streamdetails: StreamDetails, duration: int = 0) -> QueueItem:
++    return QueueItem(
++        queue_id=QUEUE_ID,
++        queue_item_id="qi1",
++        name="Episode One",
++        duration=duration,
++        media_item=media_item,
++        streamdetails=streamdetails,
++    )
++
++
++async def test_probed_duration_is_applied_and_stored() -> None:
++    """A duration from the stream lands on the queue item, its media item and the store."""
++    harness = _harness()
++    episode = _episode()
++    queue_item = _queue_item(episode, _streamdetails(MediaType.PODCAST_EPISODE, 2700))
++
++    harness.ctrl._apply_probed_duration(queue_item)
++
++    assert queue_item.duration == 2700
++    assert episode.duration == 2700
++    harness.signal_update.assert_called_once_with(QUEUE_ID, items_changed=True)
++    assert await harness.stored_duration() == 2700
++    assert _await_args(harness.cache_set).kwargs["persistent"] is True
++
++
++async def test_probed_duration_does_not_overwrite_a_known_duration() -> None:
++    """A duration reported by the provider is left alone, so no rounded value replaces it."""
++    harness = _harness()
++    episode = _episode(duration=2712)
++    queue_item = _queue_item(
++        episode, _streamdetails(MediaType.PODCAST_EPISODE, 2700), duration=2712
++    )
++
++    harness.ctrl._apply_probed_duration(queue_item)
++
++    assert queue_item.duration == 2712
++    assert episode.duration == 2712
++    harness.signal_update.assert_not_called()
++    assert await harness.stored_duration() is None
++
++
++async def test_probed_duration_is_ignored_for_radio() -> None:
++    """Radio never gets a duration, which would present it as seekable."""
++    harness = _harness()
++    queue_item = _queue_item(_radio(), _streamdetails(MediaType.RADIO, 2700))
++
++    harness.ctrl._apply_probed_duration(queue_item)
++
++    assert queue_item.duration == 0
++    harness.signal_update.assert_not_called()
++    assert await harness.stored_duration() is None
++
++
++async def test_probed_duration_without_a_result_does_nothing() -> None:
++    """A stream whose duration could not be determined leaves the item as it was."""
++    harness = _harness()
++    episode = _episode()
++    queue_item = _queue_item(episode, _streamdetails(MediaType.PODCAST_EPISODE, None))
++
++    harness.ctrl._apply_probed_duration(queue_item)
++
++    assert queue_item.duration == 0
++    assert episode.duration == 0
++    harness.signal_update.assert_not_called()
++
++
++async def test_stored_duration_is_restored_on_a_stale_item() -> None:
++    """An item played from a listing fetched before its duration was known still gets one."""
++    harness = _harness(stored=2700)
++    episode = _episode()
++    queue_item = _queue_item(episode, _streamdetails(MediaType.PODCAST_EPISODE, None))
++
++    await harness.ctrl._restore_probed_duration(queue_item)
++
++    assert queue_item.duration == 2700
++    assert episode.duration == 2700
++    assert _await_args(harness.cache_get).args[0] == EPISODE_URI
++    harness.signal_update.assert_called_once_with(QUEUE_ID, items_changed=True)
++
++
++async def test_stored_duration_is_not_looked_up_for_radio() -> None:
++    """Radio is never given a stored duration, nor is the store consulted for it."""
++    harness = _harness(stored=2700)
++    queue_item = _queue_item(_radio(), _streamdetails(MediaType.RADIO, None))
++
++    await harness.ctrl._restore_probed_duration(queue_item)
++
++    assert queue_item.duration == 0
++    harness.cache_get.assert_not_awaited()

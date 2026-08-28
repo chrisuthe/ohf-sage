@@ -1,0 +1,654 @@
+diff --git a/music_assistant/controllers/diagnostics/__init__.py b/music_assistant/controllers/diagnostics/__init__.py
+index e1e443e928..1c27731232 100644
+--- a/music_assistant/controllers/diagnostics/__init__.py
++++ b/music_assistant/controllers/diagnostics/__init__.py
+@@ -229,8 +229,10 @@ def _census_players(self) -> dict[str, Any]:
+     async def _census_library(self) -> dict[str, int]:
+         """Return the library item counts per media type."""
+         music = self.mass.music
++        # raw table sizes: a support report needs true totals, not the filtered
++        # subset visible to the (admin) user who requested it
+         return {
+-            name: await controller.library_count()
++            name: await music.database.get_count(controller.db_table)
+             for name, controller in (
+                 ("albums", music.albums),
+                 ("artists", music.artists),
+diff --git a/music_assistant/controllers/music/media/albums.py b/music_assistant/controllers/music/media/albums.py
+index 2a6ac97505..10ac6c3f00 100644
+--- a/music_assistant/controllers/music/media/albums.py
++++ b/music_assistant/controllers/music/media/albums.py
+@@ -246,7 +246,15 @@ async def library_items(
+     async def library_count(
+         self, favorite_only: bool = False, album_types: list[AlbumType] | None = None
+     ) -> int:
+-        """Return the total number of items in the library."""
++        """
++        Return the number of albums in the library.
++
++        Restricted to the providers the current user is allowed to see when that user
++        has a provider filter set.
++
++        :param favorite_only: Only count albums marked as favorite.
++        :param album_types: Only count albums of these types.
++        """
+         sql_query = f"SELECT item_id FROM {self.db_table}"
+         query_parts: list[str] = []
+         query_params: dict[str, Any] = {}
+@@ -255,6 +263,10 @@ async def library_count(
+         if album_types:
+             query_parts.append("albums.album_type IN :album_types")
+             query_params["album_types"] = [x.value for x in album_types]
++        if provider_filter := self._ensure_provider_filter(None):
++            query_parts.append(
++                self._provider_filter_clause(query_params, provider_filter, in_library_only=True)
++            )
+         if query_parts:
+             sql_query += f" WHERE {' AND '.join(query_parts)}"
+         return await self.mass.music.database.get_count_from_query(sql_query, query_params)
+diff --git a/music_assistant/controllers/music/media/artists.py b/music_assistant/controllers/music/media/artists.py
+index b5a016c67b..c70e0ed188 100644
+--- a/music_assistant/controllers/music/media/artists.py
++++ b/music_assistant/controllers/music/media/artists.py
+@@ -112,9 +112,19 @@ async def library_count(
+         album_artists_only: bool = False,
+         artist_type: ArtistType | None = None,
+     ) -> int:
+-        """Return the total number of items in the library."""
++        """
++        Return the number of artists in the library.
++
++        Restricted to the providers the current user is allowed to see when that user
++        has a provider filter set.
++
++        :param favorite_only: Only count artists marked as favorite.
++        :param album_artists_only: Only count artists that have albums.
++        :param artist_type: Only count artists of this type.
++        """
+         sql_query = f"SELECT item_id FROM {self.db_table}"
+         query_parts = []
++        query_params: dict[str, Any] = {}
+         if artist_type:
+             query_parts.append(f"artist_type = '{artist_type}'")
+         if favorite_only:
+@@ -124,9 +134,13 @@ async def library_count(
+                 f"item_id in (select {DB_TABLE_ALBUM_ARTISTS}.artist_id "
+                 f"FROM {DB_TABLE_ALBUM_ARTISTS})"
+             )
++        if provider_filter := self._ensure_provider_filter(None):
++            query_parts.append(
++                self._provider_filter_clause(query_params, provider_filter, in_library_only=True)
++            )
+         if query_parts:
+             sql_query += f" WHERE {' AND '.join(query_parts)}"
+-        return await self.mass.music.database.get_count_from_query(sql_query)
++        return await self.mass.music.database.get_count_from_query(sql_query, query_params)
+ 
+     async def library_items(  # noqa: PLR0913
+         self,
+diff --git a/music_assistant/controllers/music/media/base.py b/music_assistant/controllers/music/media/base.py
+index d7178e7aa7..235d1d715d 100644
+--- a/music_assistant/controllers/music/media/base.py
++++ b/music_assistant/controllers/music/media/base.py
+@@ -365,11 +365,26 @@ async def remove_item_from_library(self, item_id: str | int, recursive: bool = T
+         self.logger.debug("deleted item with id %s from database", db_id)
+ 
+     async def library_count(self, favorite_only: bool = False) -> int:
+-        """Return the total number of items in the library."""
++        """
++        Return the number of items in the library.
++
++        Restricted to the providers the current user is allowed to see when that user
++        has a provider filter set.
++
++        :param favorite_only: Only count items marked as favorite.
++        """
++        query_parts: list[str] = []
++        query_params: dict[str, Any] = {}
+         if favorite_only:
+-            sql_query = f"SELECT item_id FROM {self.db_table} WHERE favorite = 1"
+-            return await self.mass.music.database.get_count_from_query(sql_query)
+-        return await self.mass.music.database.get_count(self.db_table)
++            query_parts.append("favorite = 1")
++        if provider_filter := self._ensure_provider_filter(None):
++            query_parts.append(
++                self._provider_filter_clause(query_params, provider_filter, in_library_only=True)
++            )
++        if not query_parts:
++            return await self.mass.music.database.get_count(self.db_table)
++        sql_query = f"SELECT item_id FROM {self.db_table} WHERE {' AND '.join(query_parts)}"
++        return await self.mass.music.database.get_count_from_query(sql_query, query_params)
+ 
+     if TYPE_CHECKING:
+ 
+@@ -1655,32 +1670,46 @@ def _apply_filters(
+                 "AND gm.genre_id IN :genre_ids)"
+             )
+         # Apply the provider filter
++        if provider_filter or in_library_only:
++            query_parts.append(
++                self._provider_filter_clause(query_params, provider_filter, in_library_only)
++            )
++
++    @final
++    def _provider_filter_clause(
++        self,
++        query_params: dict[str, Any],
++        provider_filter: list[str] | None,
++        in_library_only: bool = False,
++    ) -> str:
++        """
++        Return the SQL clause that restricts items by their provider mappings.
++
++        At least one of provider_filter/in_library_only must be set, otherwise the
++        returned clause only asserts that the item has any mapping at all.
++
++        :param query_params: Query params dict; the clause's bound params are added to it.
++        :param provider_filter: Only match items mapped to one of these provider instances.
++        :param in_library_only: Only match provider mappings that are in the provider's library.
++        """
+         # NOTE: provider mapping filters are applied as a correlated EXISTS subquery
+         # instead of a JOIN + GROUP BY, so SQLite can stream results straight from the
+         # sort index instead of materializing/sorting the whole (deduped) result set.
++        query_params["provider_media_type"] = self.media_type.value
++        conditions = [
++            f"provider_mappings.item_id = {self.db_table}.item_id",
++            "provider_mappings.media_type = :provider_media_type",
++        ]
++        if in_library_only:
++            conditions.append("provider_mappings.in_library = 1")
+         if provider_filter:
+             provider_conditions = []
+             for idx, prov in enumerate(provider_filter):
+                 param_name = f"provider_filter_{idx}"
+                 provider_conditions.append(f"provider_mappings.provider_instance = :{param_name}")
+                 query_params[param_name] = prov
+-            query_params["provider_media_type"] = self.media_type.value
+-            in_library_clause = "AND provider_mappings.in_library = 1 " if in_library_only else ""
+-            query_parts.append(
+-                "EXISTS(SELECT 1 FROM provider_mappings "
+-                f"WHERE provider_mappings.item_id = {self.db_table}.item_id "
+-                "AND provider_mappings.media_type = :provider_media_type "
+-                f"{in_library_clause}"
+-                f"AND ({' OR '.join(provider_conditions)}))"
+-            )
+-        elif in_library_only:
+-            query_params["provider_media_type"] = self.media_type.value
+-            query_parts.append(
+-                "EXISTS(SELECT 1 FROM provider_mappings "
+-                f"WHERE provider_mappings.item_id = {self.db_table}.item_id "
+-                "AND provider_mappings.media_type = :provider_media_type "
+-                "AND provider_mappings.in_library = 1)"
+-            )
++            conditions.append(f"({' OR '.join(provider_conditions)})")
++        return f"EXISTS(SELECT 1 FROM provider_mappings WHERE {' AND '.join(conditions)})"
+ 
+     @final
+     def _build_final_query(
+diff --git a/music_assistant/controllers/music/media/genres.py b/music_assistant/controllers/music/media/genres.py
+index 1743ea6736..0aba6252a9 100644
+--- a/music_assistant/controllers/music/media/genres.py
++++ b/music_assistant/controllers/music/media/genres.py
+@@ -281,6 +281,21 @@ def summary_query(self) -> tuple[str, dict[str, Any]]:
+         FROM (SELECT * FROM {DB_TABLE_GENRES} WHERE is_excluded = 0) AS {DB_TABLE_GENRES}"""
+         return query, {}
+ 
++    async def library_count(self, favorite_only: bool = False) -> int:
++        """
++        Return the total number of genres in the library.
++
++        Never restricted by the current user's provider filter.
++
++        :param favorite_only: Only count genres marked as favorite.
++        """
++        # Genres are library-only items without provider_mappings, so - just like
++        # library_items below - the user's provider filter does not apply here.
++        if favorite_only:
++            sql_query = f"SELECT item_id FROM {self.db_table} WHERE favorite = 1"
++            return await self.mass.music.database.get_count_from_query(sql_query)
++        return await self.mass.music.database.get_count(self.db_table)
++
+     async def library_items(  # noqa: PLR0913
+         self,
+         favorite: bool | None = None,
+diff --git a/music_assistant/providers/profiler/provider.py b/music_assistant/providers/profiler/provider.py
+index a1dfb07964..6c30faade0 100644
+--- a/music_assistant/providers/profiler/provider.py
++++ b/music_assistant/providers/profiler/provider.py
+@@ -290,7 +290,11 @@ async def _get_library_counts(self) -> dict[str, int]:
+             self.mass.music.audiobooks,
+             self.mass.music.podcasts,
+         ):
+-            counts[controller.media_type.value] = await controller.library_count()
++            # raw table sizes: a profiler report needs true totals, not the filtered
++            # subset visible to the (admin) user who requested it
++            counts[controller.media_type.value] = await self.mass.music.database.get_count(
++                controller.db_table
++            )
+         return counts
+ 
+     def _on_mass_event(self, event: MassEvent) -> None:
+diff --git a/tests/controllers/music/test_music_user_filters.py b/tests/controllers/music/test_music_user_filters.py
+index 4dcacd29ee..2becc51a5b 100644
+--- a/tests/controllers/music/test_music_user_filters.py
++++ b/tests/controllers/music/test_music_user_filters.py
+@@ -2,12 +2,34 @@
+ 
+ from __future__ import annotations
+ 
++from typing import Any
+ from unittest.mock import Mock, patch
++from uuid import uuid4
+ 
++import pytest
+ from music_assistant_models.auth import UserRole
+-from music_assistant_models.enums import ProviderFeature, ProviderType
++from music_assistant_models.enums import (
++    AlbumType,
++    ArtistType,
++    ProviderFeature,
++    ProviderType,
++)
++from music_assistant_models.media_items import (
++    Album,
++    Artist,
++    Genre,
++    ProviderMapping,
++    Track,
++    UniqueList,
++)
+ 
++from music_assistant.constants import DB_TABLE_PROVIDER_MAPPINGS
+ from music_assistant.controllers.music import MusicController
++from music_assistant.mass import MusicAssistant
++
++GET_CURRENT_USER = "music_assistant.controllers.music.media.base.get_current_user"
++PROV_A = "prov_a_inst"
++PROV_B = "prov_b_inst"
+ 
+ 
+ def _make_prov(
+@@ -89,3 +111,173 @@ async def test_browse_root_honors_admin_provider_filter(mock_get_user: Mock) ->
+     result = await controller.browse(path=None)
+ 
+     assert [folder.path for folder in result] == ["m_a://"]  # type: ignore[union-attr]
++
++
++def _mapping(provider_instance: str) -> ProviderMapping:
++    """Create an in-library provider mapping with a unique provider item id."""
++    return ProviderMapping(
++        item_id=uuid4().hex,
++        provider_domain=provider_instance.removesuffix("_inst"),
++        provider_instance=provider_instance,
++        in_library=True,
++    )
++
++
++@pytest.fixture(scope="module")
++async def counted_mass(music_mass_module: MusicAssistant) -> MusicAssistant:
++    """
++    Return a database-only instance seeded with items spread over two providers.
++
++    Every media type is seeded so that a PROV_A filter excludes at least one item but
++    keeps at least one, for each of the filter combinations the counts support.
++    """
++    mass = music_mass_module
++    artists: list[Artist] = []
++    for name, providers, favorite in (
++        ("Artist 01", [PROV_A], True),
++        ("Artist 02", [PROV_B], True),
++        ("Artist 03", [PROV_A, PROV_B], False),
++    ):
++        artist = Artist(
++            item_id="0",
++            provider="library",
++            name=name,
++            provider_mappings={_mapping(prov) for prov in providers},
++            favorite=favorite,
++        )
++        artists.append(await mass.music.artists.add_item_to_library(artist))
++
++    albums: list[Album] = []
++    for idx, (name, providers, album_type, favorite) in enumerate(
++        (
++            ("Album 01", [PROV_A], AlbumType.ALBUM, True),
++            ("Album 02", [PROV_B], AlbumType.ALBUM, True),
++            ("Album 03", [PROV_A, PROV_B], AlbumType.SINGLE, False),
++            ("Album 04", [PROV_B], AlbumType.SINGLE, False),
++        )
++    ):
++        album = Album(
++            item_id="0",
++            provider="library",
++            name=name,
++            album_type=album_type,
++            provider_mappings={_mapping(prov) for prov in providers},
++            # Artist 03 gets no album, so album_artists_only excludes something
++            artists=UniqueList([artists[idx % 2]]),
++            favorite=favorite,
++        )
++        albums.append(await mass.music.albums.add_item_to_library(album))
++
++    for idx, (name, providers, favorite) in enumerate(
++        (
++            ("Track 01", [PROV_A], True),
++            ("Track 02", [PROV_B], True),
++            ("Track 03", [PROV_A, PROV_B], False),
++            ("Track 04", [PROV_B], False),
++            ("Track 05", [PROV_A], False),
++        )
++    ):
++        track = Track(
++            item_id="0",
++            provider="library",
++            name=name,
++            provider_mappings={_mapping(prov) for prov in providers},
++            artists=UniqueList([artists[idx % len(artists)]]),
++            album=albums[idx % len(albums)],
++            disc_number=1,
++            track_number=idx + 1,
++            favorite=favorite,
++        )
++        await mass.music.tracks.add_item_to_library(track)
++
++    # a track whose only PROV_A mapping left the provider's library: it must be excluded
++    # from both the filtered listing and the filtered count
++    hidden = Track(
++        item_id="0",
++        provider="library",
++        name="Track hidden",
++        provider_mappings={_mapping(PROV_A)},
++        artists=UniqueList([artists[0]]),
++        album=albums[0],
++        disc_number=1,
++        track_number=99,
++        favorite=True,
++    )
++    db_hidden = await mass.music.tracks.add_item_to_library(hidden)
++    await mass.music.database.execute(
++        f"UPDATE {DB_TABLE_PROVIDER_MAPPINGS} SET in_library = 0 "
++        "WHERE item_id = :item_id AND media_type = 'track'",
++        {"item_id": int(db_hidden.item_id)},
++    )
++    await mass.music.genres.add_item_to_library(
++        Genre(item_id="0", provider="library", name="Test Genre", provider_mappings=set())
++    )
++    await mass.music.database.commit()
++    return mass
++
++
++@pytest.mark.parametrize(
++    ("media_type", "count_kwargs"),
++    [
++        ("tracks", {}),
++        ("tracks", {"favorite_only": True}),
++        ("albums", {}),
++        ("albums", {"favorite_only": True}),
++        ("albums", {"album_types": [AlbumType.ALBUM]}),
++        ("artists", {}),
++        ("artists", {"favorite_only": True}),
++        ("artists", {"album_artists_only": True}),
++        ("artists", {"artist_type": ArtistType.SINGER}),
++    ],
++)
++async def test_library_count_matches_list_for_filtered_user(
++    counted_mass: MusicAssistant,
++    media_type: str,
++    count_kwargs: dict[str, Any],
++) -> None:
++    """A user's provider_filter must narrow library_count the same way it narrows the list."""
++    controller = getattr(counted_mass.music, media_type)
++    # library_items spells the favorite filter 'favorite', library_count 'favorite_only'
++    list_kwargs = {
++        ("favorite" if key == "favorite_only" else key): value
++        for key, value in count_kwargs.items()
++    }
++    with patch(GET_CURRENT_USER, return_value=None):
++        unfiltered_count = await controller.library_count(**count_kwargs)
++    with patch(GET_CURRENT_USER, return_value=Mock(provider_filter=[PROV_A])):
++        filtered_count = await controller.library_count(**count_kwargs)
++        # the limit must exceed the seeded row count, so the list is never truncated
++        filtered_items = await controller.library_items(limit=500, **list_kwargs)
++
++    assert filtered_count == len(filtered_items)
++    # guard against a vacuous pass: the filter must actually exclude something
++    assert 0 < filtered_count < unfiltered_count
++
++
++async def test_library_count_unchanged_without_user(counted_mass: MusicAssistant) -> None:
++    """Without an authenticated user the counts stay the true library totals."""
++    for media_type in ("tracks", "albums", "artists"):
++        controller = getattr(counted_mass.music, media_type)
++        total_rows = await counted_mass.music.database.get_count(controller.db_table)
++        with patch(GET_CURRENT_USER, return_value=None):
++            assert await controller.library_count() == total_rows
++
++
++async def test_library_count_unchanged_for_user_without_filter(
++    counted_mass: MusicAssistant,
++) -> None:
++    """A user without a provider_filter set sees the true library totals."""
++    total_rows = await counted_mass.music.database.get_count("tracks")
++    with patch(GET_CURRENT_USER, return_value=Mock(provider_filter=[])):
++        assert await counted_mass.music.tracks.library_count() == total_rows
++
++
++async def test_genre_library_count_ignores_provider_filter(
++    counted_mass: MusicAssistant,
++) -> None:
++    """Genres have no provider mappings, so a provider_filter must not zero their count."""
++    with patch(GET_CURRENT_USER, return_value=None):
++        unfiltered_count = await counted_mass.music.genres.library_count()
++    with patch(GET_CURRENT_USER, return_value=Mock(provider_filter=[PROV_A])):
++        assert await counted_mass.music.genres.library_count() == unfiltered_count
++    assert unfiltered_count > 0
+diff --git a/tests/core/test_diagnostics.py b/tests/core/test_diagnostics.py
+index ccbe4a28e0..d977ba3d71 100644
+--- a/tests/core/test_diagnostics.py
++++ b/tests/core/test_diagnostics.py
+@@ -6,10 +6,16 @@
+ import logging
+ import sys
+ from typing import TYPE_CHECKING, Any
+-from unittest.mock import patch
++from unittest.mock import Mock, patch
+ 
+ import pytest
+ from music_assistant_models.auth import Scope
++from music_assistant_models.media_items import (
++    Artist,
++    ProviderMapping,
++    Track,
++    UniqueList,
++)
+ 
+ from music_assistant.controllers.diagnostics import DiagnosticsController
+ from music_assistant.helpers.diagnostics import (
+@@ -272,6 +278,64 @@ async def test_get_report(mass: MusicAssistant) -> None:
+     assert len(json_dumps(report_with_tail)) < 100_000
+ 
+ 
++async def _seed_library_track(mass: MusicAssistant) -> None:
++    """Add a single library track mapped to one (fake) provider instance."""
++
++    def _mapping(item_id: str) -> set[ProviderMapping]:
++        return {
++            ProviderMapping(
++                item_id=item_id,
++                provider_domain="prov_a",
++                provider_instance="prov_a_inst",
++                in_library=True,
++            )
++        }
++
++    artist = await mass.music.artists.add_item_to_library(
++        Artist(
++            item_id="0",
++            provider="library",
++            name="Census Artist",
++            provider_mappings=_mapping("census_artist"),
++        )
++    )
++    await mass.music.tracks.add_item_to_library(
++        Track(
++            item_id="0",
++            provider="library",
++            name="Census Track",
++            provider_mappings=_mapping("census_track"),
++            artists=UniqueList([artist]),
++        )
++    )
++
++
++async def test_library_census_ignores_requesting_user_provider_filter(
++    mass: MusicAssistant,
++) -> None:
++    """
++    Test that the library census reports true totals, not what the requesting admin sees.
++
++    diagnostics/get runs inside the requesting user's context, so a census built from the
++    user-scoped library_count() would silently understate the library in support reports.
++
++    :param mass: Full Music Assistant test instance.
++    """
++    await _seed_library_track(mass)
++    unfiltered_census = await mass.diagnostics._census_library()
++    with patch(
++        "music_assistant.controllers.music.media.base.get_current_user",
++        return_value=Mock(provider_filter=["no_such_provider"]),
++    ):
++        census = await mass.diagnostics._census_library()
++    # the seeded items have no mapping on the filtered provider, so a user-scoped count
++    # would report 0 for them
++    assert census["artists"] == 1
++    assert census["tracks"] == 1
++    # nothing at all may shift when a filtered user is the one asking
++    assert census == unfiltered_census
++
++
+ async def test_get_report_command_admin_only(mass: MusicAssistant) -> None:
+     """
+     Test that the diagnostics/get API command is registered with admin-only scope.
+diff --git a/tests/providers/profiler/test_profiler.py b/tests/providers/profiler/test_profiler.py
+index d73f9420b8..809389f0ef 100644
+--- a/tests/providers/profiler/test_profiler.py
++++ b/tests/providers/profiler/test_profiler.py
+@@ -10,6 +10,7 @@
+ 
+ import pytest
+ import yappi
++from music_assistant_models.media_items import Artist, ProviderMapping
+ 
+ from music_assistant.providers.profiler import provider as provider_module
+ from music_assistant.providers.profiler.helpers import (
+@@ -37,6 +38,44 @@ async def profiler(mass: MusicAssistant) -> ProfilerProvider:
+     return provider
+ 
+ 
++async def test_library_counts_ignore_requesting_user_provider_filter(
++    profiler: ProfilerProvider,
++    mass: MusicAssistant,
++) -> None:
++    """Test that the report's library counts are true totals, not the admin's filtered view."""
++    await mass.music.artists.add_item_to_library(
++        Artist(
++            item_id="0",
++            provider="library",
++            name="Census Artist",
++            provider_mappings={
++                ProviderMapping(
++                    item_id="census_artist",
++                    provider_domain="prov_a",
++                    provider_instance="prov_a_inst",
++                    in_library=True,
++                )
++            },
++        )
++    )
++    with mock.patch(
++        "music_assistant.controllers.music.media.base.get_current_user",
++        return_value=mock.Mock(provider_filter=["no_such_provider"]),
++    ):
++        counts = await profiler._get_library_counts()
++    # the seeded artist has no mapping on the filtered provider, so a user-scoped count
++    # would report 0 for it
++    assert counts == {
++        "artist": 1,
++        "album": 0,
++        "track": 0,
++        "playlist": 0,
++        "radio": 0,
++        "audiobook": 0,
++        "podcast": 0,
++    }
++
++
+ async def test_report_shape(profiler: ProfilerProvider) -> None:
+     """Test that the report contains all sections with sane, bounded content."""
+     report = await profiler.get_report()
+diff --git a/tests/test_library_sync.py b/tests/test_library_sync.py
+index d454976469..0c31d21000 100644
+--- a/tests/test_library_sync.py
++++ b/tests/test_library_sync.py
+@@ -678,6 +678,7 @@ def _create_controller_for_filter_tests() -> Mock:
+     ctrl.media_type = MediaType.ALBUM
+     ctrl.db_table = "albums"
+     ctrl._apply_filters = MediaControllerBase._apply_filters.__get__(ctrl)
++    ctrl._provider_filter_clause = MediaControllerBase._provider_filter_clause.__get__(ctrl)
+     return ctrl
+ 
+ 
+@@ -703,9 +704,14 @@ async def test_apply_filters_in_library_only_without_provider_filter() -> None:
+     )
+ 
+     assert len(query_parts) == 1
+-    assert query_parts[0].startswith("EXISTS(")
+-    assert "provider_mappings.in_library = 1" in query_parts[0]
+     assert "provider_media_type" in query_params
++    # pin the exact clause: library_count() shares this builder
++    assert query_parts[0] == (
++        "EXISTS(SELECT 1 FROM provider_mappings "
++        "WHERE provider_mappings.item_id = albums.item_id "
++        "AND provider_mappings.media_type = :provider_media_type "
++        "AND provider_mappings.in_library = 1)"
++    )
+ 
+ 
+ async def test_apply_filters_in_library_only_with_provider_filter() -> None:
+@@ -730,10 +736,15 @@ async def test_apply_filters_in_library_only_with_provider_filter() -> None:
+     )
+ 
+     assert len(query_parts) == 1
+-    assert query_parts[0].startswith("EXISTS(")
+-    assert "provider_mappings.in_library = 1" in query_parts[0]
+-    assert "provider_filter_0" in query_params
+     assert query_params["provider_filter_0"] == "spotify_1"
++    # pin the exact clause: library_count() shares this builder
++    assert query_parts[0] == (
++        "EXISTS(SELECT 1 FROM provider_mappings "
++        "WHERE provider_mappings.item_id = albums.item_id "
++        "AND provider_mappings.media_type = :provider_media_type "
++        "AND provider_mappings.in_library = 1 "
++        "AND (provider_mappings.provider_instance = :provider_filter_0))"
++    )
+ 
+ 
+ async def test_apply_filters_no_in_library_filter_by_default() -> None:
+@@ -782,9 +793,14 @@ async def test_apply_filters_provider_filter_without_in_library() -> None:
+     )
+ 
+     assert len(query_parts) == 1
+-    assert query_parts[0].startswith("EXISTS(")
+-    assert "in_library" not in query_parts[0]
+-    assert "provider_filter_0" in query_params
++    assert query_params["provider_filter_0"] == "spotify_1"
++    # pin the exact clause: library_count() shares this builder
++    assert query_parts[0] == (
++        "EXISTS(SELECT 1 FROM provider_mappings "
++        "WHERE provider_mappings.item_id = albums.item_id "
++        "AND provider_mappings.media_type = :provider_media_type "
++        "AND (provider_mappings.provider_instance = :provider_filter_0))"
++    )
+ 
+ 
+ # --- Group 5: set_provider_mappings behavior ---

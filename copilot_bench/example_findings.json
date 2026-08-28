@@ -1,0 +1,44 @@
+{
+  "5079": {
+    "title": "Adds a new Local Audio Source provider plugin",
+    "findings": [
+      {"severity": "PROBLEM", "path": "music_assistant/providers/local_audio_source/helpers.py", "line": 21, "issue": "get_available_input_devices() catches FileNotFoundError/RuntimeError and collapses them into an empty device list with no logging, silently hiding a missing/broken pactl during setup; the sibling _resolve_audio_format() logs a warning for the identical exceptions.", "principle": "MUST never silently swallow errors or anomalous data; surface it (log/raise) rather than collapsing a failure into a silent default.", "citation_url": "https://github.com/music-assistant/server/pull/1214#discussion_r1557137671"},
+      {"severity": "PROBLEM", "path": "music_assistant/providers/local_audio_source/provider.py", "line": null, "issue": "The PR adds a ~700-line provider plus helper modules (capture streaming, auto-trigger sensor loop, format resolution, source-claim lifecycle) but no tests under tests/. New functionality must ship with added/updated tests and keep pytest green.", "principle": "MUST add or update tests under tests/ for new functionality and keep pytest green.", "citation_url": "https://github.com/music-assistant/server/blob/HEAD/.github/PULL_REQUEST_TEMPLATE.md"},
+      {"severity": "SUGGESTION", "path": "music_assistant/providers/local_audio_source/provider.py", "line": 583, "issue": "_auto_stop_playback() reaches into queue.current_item.uri to decide whether to stop; providers are discouraged from reading queue/queue-item state directly rather than coordinating through the queue controller.", "principle": "MUST not read or mutate queue/player state directly from a provider; let the queue controller own that state.", "citation_url": "https://github.com/music-assistant/server/pull/2283#discussion_r2249779942"}
+    ]
+  },
+  "5151": {
+    "title": "Add Overcast podcast provider",
+    "findings": [
+      {"severity": "PROBLEM", "path": "music_assistant/providers/overcast/provider.py", "line": 538, "issue": "handle_async_init creates its own aiohttp session via create_clientsession() per provider instance instead of reusing self.mass.http_session. The multi-instance cookie-isolation rationale is understandable, but the standard is to reuse the shared global session and never spin up a per-provider one; the authenticated Overcast calls should reuse mass.http_session (e.g. by setting the session cookie per-request).", "principle": "MUST reuse the shared global aiohttp session (self.mass.http_session); never create a new ClientSession per request or per provider.", "citation_url": "https://github.com/music-assistant/server/pull/1817#discussion_r1903244819"},
+      {"severity": "PROBLEM", "path": "music_assistant/providers/overcast/provider.py", "line": 707, "issue": "The Overcast session cookie is a bearer credential (equivalent to the account login) but is persisted via _update_setup_data(CONF_SESSION_COOKIE, morsel.value) without being typed/stored as a SECURE_STRING. Unlike the password, it is therefore not encrypted at rest nor masked in config serialization, so it can leak through config output.", "principle": "MUST handle secrets carefully: mask secure config values in serialization and never persist credentials in plaintext.", "citation_url": "https://github.com/music-assistant/server/pull/4882#discussion_r3634243924"}
+    ]
+  },
+  "5180": {
+    "title": "ytmusic: complete uploaded music resolution",
+    "findings": [
+      {"severity": "PROBLEM", "path": "music_assistant/providers/ytmusic/helpers.py", "line": 181, "issue": "get_library_artists now concatenates get_library_subscriptions() + get_library_artists() + get_library_upload_artists() with no deduplication. A followed artist that also has songs in the library is returned by both get_library_subscriptions and get_library_artists (both key on the same browseId), so it appears twice in the artist listing.", "principle": "When combining item sources that can overlap, deduplicate in the function body (e.g. via a temporary UniqueList) rather than returning duplicates.", "citation_url": "https://github.com/music-assistant/server/pull/2632#issuecomment-3563511797"},
+      {"severity": "SUGGESTION", "path": "music_assistant/providers/ytmusic/helpers.py", "line": 230, "issue": "The new upload calls reuse the hardcoded limit=9999 (notably get_library_upload_songs), a fixed cap a real user can exceed since YouTube Music uploads allow far more than 9999 tracks; anything past the cap is silently dropped. It mirrors the file's existing pattern, but the uploaded-songs path is where a large library will actually be truncated.", "principle": "MUST not hardcode a limit a real user can exceed (e.g. a fixed library-size cap); paginate or derive the value instead.", "citation_url": "https://github.com/music-assistant/server/pull/3640#discussion_r3072722851"}
+    ]
+  },
+  "5165": {
+    "title": "Library item counts now respect the user's provider filter",
+    "findings": [
+      {"severity": "PROBLEM", "path": "music_assistant/providers/profiler/provider.py", "line": 295, "issue": "The profiler (a plugin-type provider) now reaches into self.mass.music.database.get_count() directly instead of going through the controller API, in order to get unfiltered totals. Providers/plugins must not touch the database directly; expose an unfiltered-total method on the media controller and have both the profiler and the diagnostics controller use it (which also removes the raw-count logic and comment now duplicated across both files).", "principle": "MUST treat providers as isolated units and never touch the database directly — coordinate through the controller API.", "citation_url": "https://github.com/music-assistant/server/pull/2911#discussion_r2853705643"}
+    ]
+  },
+  "5178": {
+    "title": "Establish and keep the duration of podcast episodes if their feed does not supply it",
+    "findings": [
+      {"severity": "SUGGESTION", "path": "music_assistant/controllers/player_queues/controller.py", "line": 971, "issue": "The resume-seek duration resolution is added to the player_queues controller (_restore_probed_duration plus the new duration guard in play_index), layered on top of the get_stream_details fallback in streams/audio.py. The direct predecessor of this feature was pushed back for resolving missing durations in the player_queues controller instead of the stream pipeline; consider consolidating the probed-duration restore closer to get_stream_details where it is technically feasible.", "principle": "Keep shared/player-pipeline logic in its owning controller and resolve missing durations in the stream pipeline rather than special-casing the core player_queues controller.", "citation_url": "https://github.com/music-assistant/server/pull/3896#discussion_r3291222180"}
+    ]
+  },
+  "5179": {
+    "title": "Cache podcast episode listings and batch their resume lookups",
+    "findings": []
+  },
+  "5177": {
+    "title": "Fix noisy 'Task exception was never retrieved' errors in the log",
+    "findings": []
+  }
+}

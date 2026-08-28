@@ -1,0 +1,429 @@
+[
+  {
+    "idx": 12,
+    "config": "c4",
+    "seed": 0,
+    "pr": 54,
+    "repo": "music-assistant/server",
+    "src_pr": 6063,
+    "author": "marcelveldt",
+    "ground_truth": "INFEASIBLE (maintainer): nothing can open a second stream of the same audiobook while the first is streaming; prebuffer skipped for realtime",
+    "path": "music_assistant/providers/spotify/backends/soloist.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nA chapter-boundary race can let the stale stream undo the replacement seek, and the PR includes an unrelated full-file rewrite.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nFixes Spotify Soloist audiobook seeking across chapter boundaries by superseding the previous stream.\n\n**Changes:**\n- Tracks the Music Assistant item served by each Soloist channel.\n- Adds and handles `StreamSupersededError`.\n- Adds regression tests and documentation.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Unrelated no-op rewrite. |\r\n| `music_assistant/providers/spotify/README.md` | Documents seek takeover behavior. |\r\n| `music_assistant/providers/spotify/provider.py` | Stops superseded audiobook stitching. |\r\n| `music_assistant/providers/spotify/backends/base.py` | Defines the supersession error. |\r\n| `music_assistant/providers/spotify/backends/__init__.py` | Exports the new error. |\r\n| `music_assistant/providers/spotify/backends/soloist.py` | Implements session takeover and supersession signaling. |\r\n| `tests/providers/spotify/test_soloist_backend.py` | Adds seek and supersession coverage. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 6/7 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 1,
+          "body": "[PROBLEM] This full-file no-op rewrite is unrelated to the Spotify seek fix and creates unnecessary review and blame churn; restore this file to the base revision and keep the PR single-purpose."
+        },
+        {
+          "path": "music_assistant/providers/spotify/backends/soloist.py",
+          "line": 608,
+          "body": "[CRITICAL] A seek can be undone if it lands between chapter acquisitions: once chapter A releases, the seek can start a replacement session, but the stale original loop's request for chapter B also passes `serves_only(media_key)` and stops that replacement. Pass an explicit continuation marker from the audiobook loop and terminate a stale same-item continuation with `StreamSupersededError`; add a regression test for this interleaving."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 12,
+    "config": "c4",
+    "seed": 1,
+    "pr": 55,
+    "repo": "music-assistant/server",
+    "src_pr": 6063,
+    "author": "marcelveldt",
+    "ground_truth": "INFEASIBLE (maintainer): nothing can open a second stream of the same audiobook while the first is streaming; prebuffer skipped for realtime",
+    "path": "music_assistant/providers/spotify/backends/soloist.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nA stale chapter continuation can reclaim the replacement session, and the unrelated no-op file rewrite should be removed.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nBenchmark reproduction of #6063, addressing Spotify Soloist audiobook seeks across chapter boundaries.\n\n**Changes:**\n- Tracks stream ownership and signals superseded streams.\n- Prevents superseded audiobook streams from stitching further chapters.\n- Adds regression tests and documentation.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | No-op full-file rewrite. |\r\n| `music_assistant/providers/spotify/README.md` | Documents seek takeover behavior. |\r\n| `music_assistant/providers/spotify/provider.py` | Handles superseded streams. |\r\n| `music_assistant/providers/spotify/backends/soloist.py` | Implements session ownership and replacement. |\r\n| `music_assistant/providers/spotify/backends/base.py` | Defines the supersession error. |\r\n| `music_assistant/providers/spotify/backends/__init__.py` | Exports the new error. |\r\n| `tests/providers/spotify/test_soloist_backend.py` | Adds regression coverage. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 6/7 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 1,
+          "body": "[PROBLEM] This full-file rewrite has no semantic changes and is unrelated to the Spotify audiobook fix, so it adds review and blame noise; revert this file from the pull request."
+        },
+        {
+          "path": "music_assistant/providers/spotify/backends/soloist.py",
+          "line": 608,
+          "body": "[CRITICAL] `serves_only(media_key)` also matches the stale audiobook loop after a seek replaces it between chapter acquisitions, so that loop can stop or reseek the live replacement when it requests its next chapter; pass an explicit continuation flag from the chapter loop, reject such continuations when that queue/item is already being served, and add an interleaving regression test."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 12,
+    "config": "c4",
+    "seed": 2,
+    "pr": 56,
+    "repo": "music-assistant/server",
+    "src_pr": 6063,
+    "author": "marcelveldt",
+    "ground_truth": "INFEASIBLE (maintainer): nothing can open a second stream of the same audiobook while the first is streaming; prebuffer skipped for realtime",
+    "path": "music_assistant/providers/spotify/backends/soloist.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nQueue occurrences are conflated by media URI, allowing prebuffering to interrupt repeated audiobook playback.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nReproduces #6063\u2019s Spotify Soloist audiobook seek fix.\n\n**Changes:**\n- Tracks superseded streams across chapter seeks.\n- Stops obsolete audiobook streams from stitching further chapters.\n- Adds regression tests and documentation.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `tests/providers/spotify/test_soloist_backend.py` | Adds seek and supersession tests. |\r\n| `music_assistant/providers/spotify/README.md` | Documents cross-chapter seek behavior. |\r\n| `music_assistant/providers/spotify/provider.py` | Handles superseded streams. |\r\n| `music_assistant/providers/spotify/backends/soloist.py` | Implements session takeover logic. |\r\n| `music_assistant/providers/spotify/backends/base.py` | Defines the supersession error. |\r\n| `music_assistant/providers/spotify/backends/__init__.py` | Exports the new error. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Contains an unrelated no-op rewrite. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 6/7 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": "music_assistant/providers/spotify/backends/soloist.py",
+          "line": 549,
+          "body": "[CRITICAL] `streamdetails.uri` identifies media, not a queue occurrence, so prebuffering a second occurrence of the same audiobook on this queue passes `serves_only()` and restarts the active session (potentially from chapter one), cutting off current playback. Resolve and store the owning queue item's `queue_item_id` instead, and cover two consecutive occurrences of the same audiobook."
+        },
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 1,
+          "body": "[PROBLEM] This rewrites the entire review-standards file without changing its content and is unrelated to the Spotify seek fix; please revert this file to keep the bugfix single-purpose and preserve useful history."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 12,
+    "config": "c4",
+    "seed": 3,
+    "pr": 57,
+    "repo": "music-assistant/server",
+    "src_pr": 6063,
+    "author": "marcelveldt",
+    "ground_truth": "INFEASIBLE (maintainer): nothing can open a second stream of the same audiobook while the first is streaming; prebuffer skipped for realtime",
+    "path": "music_assistant/providers/spotify/backends/soloist.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nA stale chapter continuation can retake the replacement session and undo the seek.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nFixes Spotify Soloist audiobook seeking across chapter boundaries by tracking stream ownership and terminating superseded streams.\n\n**Changes:**\n- Adds `StreamSupersededError` handling.\n- Allows same-item chapter seeks to replace active sessions.\n- Adds regression tests and documentation.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Rewrites standards without semantic changes. |\r\n| `music_assistant/providers/spotify/README.md` | Documents seek behavior. |\r\n| `music_assistant/providers/spotify/provider.py` | Handles superseded streams. |\r\n| `music_assistant/providers/spotify/backends/base.py` | Defines the supersession error. |\r\n| `music_assistant/providers/spotify/backends/__init__.py` | Exports the new error. |\r\n| `music_assistant/providers/spotify/backends/soloist.py` | Implements session takeover logic. |\r\n| `tests/providers/spotify/test_soloist_backend.py` | Adds regression coverage. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 6/7 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": "music_assistant/providers/spotify/backends/soloist.py",
+          "line": 608,
+          "body": "[CRITICAL] This treats every same-item request as a takeover, including the old audiobook generator advancing after a chapter boundary; if a seek starts the replacement session during that gap, the stale generator can re-seek or restart it and undo the seek. Mark chapters after the stream's starting chapter as continuations and reject a continuation with `StreamSupersededError` when that queue/item is already being served, with a regression test for this interleaving."
+        },
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 1,
+          "body": "[PROBLEM] This wholesale, semantically unchanged rewrite is unrelated to the Spotify audiobook fix and adds avoidable review/history noise; revert this file from the pull request."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 12,
+    "config": "c5",
+    "seed": 0,
+    "pr": 58,
+    "repo": "music-assistant/server",
+    "src_pr": 6063,
+    "author": "marcelveldt",
+    "ground_truth": "INFEASIBLE (maintainer): nothing can open a second stream of the same audiobook while the first is streaming; prebuffer skipped for realtime",
+    "path": "music_assistant/providers/spotify/backends/soloist.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nA chapter-boundary race can undo the replacement seek, and the new review guidance conflicts with existing instructions.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nBenchmark reproduction of #6063, addressing Spotify audiobook seeks across chapter boundaries.\n\n**Changes:**\n- Tracks the Music Assistant item served by Soloist channels.\n- Adds superseded-stream signaling and handling.\n- Adds regression tests, documentation, and review guidance.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds race-review guidance. |\r\n| `music_assistant/providers/spotify/README.md` | Documents seek takeover behavior. |\r\n| `music_assistant/providers/spotify/provider.py` | Stops superseded streams from continuing. |\r\n| `music_assistant/providers/spotify/backends/base.py` | Defines the supersession error. |\r\n| `music_assistant/providers/spotify/backends/__init__.py` | Exports the new error. |\r\n| `music_assistant/providers/spotify/backends/soloist.py` | Implements session takeover and signaling. |\r\n| `tests/providers/spotify/test_soloist_backend.py` | Adds audiobook seek regression coverage. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 7/7 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 114,
+          "body": "[PROBLEM] \u201cStill surface it\u201d conflicts with `.github/copilot-instructions.md:52`, which explicitly says not to post `[SUGGESTION]` items; make this additive rule retain that suppression instead of giving reviewers contradictory output instructions."
+        },
+        {
+          "path": "music_assistant/providers/spotify/backends/soloist.py",
+          "line": 608,
+          "body": "[CRITICAL] A seek can land between chapter acquisitions: after the old stream releases one chapter, the replacement stream claims the session, but the old loop can then enter this condition for its next chapter because `serves_only(media_key)` is true and stop the replacement, undoing the seek. Distinguish a chapter continuation from the first chapter of a newly requested stream, refuse a continuation when that item is already being served, and add a regression test for this interleaving."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 12,
+    "config": "c5",
+    "seed": 1,
+    "pr": 59,
+    "repo": "music-assistant/server",
+    "src_pr": 6063,
+    "author": "marcelveldt",
+    "ground_truth": "INFEASIBLE (maintainer): nothing can open a second stream of the same audiobook while the first is streaming; prebuffer skipped for realtime",
+    "path": "music_assistant/providers/spotify/backends/soloist.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nA stale chapter continuation can undo a seek, and the PR includes an unrelated guidance change.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nFixes Spotify Soloist audiobook seeking across chapter boundaries by safely superseding the previous stream.\n\n**Changes:**\n- Tracks streams by queue and media identity.\n- Adds `StreamSupersededError` handling and regression tests.\n- Updates Spotify documentation and repository review guidance.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `tests/providers/spotify/test_soloist_backend.py` | Adds seek and supersession tests. |\r\n| `music_assistant/providers/spotify/README.md` | Documents cross-chapter seeking. |\r\n| `music_assistant/providers/spotify/provider.py` | Stops superseded stream stitching. |\r\n| `music_assistant/providers/spotify/backends/soloist.py` | Implements session takeover logic. |\r\n| `music_assistant/providers/spotify/backends/base.py` | Defines the supersession error. |\r\n| `music_assistant/providers/spotify/backends/__init__.py` | Exports the new error. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds unrelated review guidance. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 7/7 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": "music_assistant/providers/spotify/backends/soloist.py",
+          "line": 608,
+          "body": "[CRITICAL] A stale audiobook continuation can retake the replacement session: if a seek starts after the old chapter closes but before its loop acquires the next chapter, the old request has the same queue/media key and this condition lets it stop or seek the new session, undoing the user's seek. Distinguish initial acquisitions from chapter continuations and reject a continuation with `StreamSupersededError` when that item already has an active stream."
+        },
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 114,
+          "body": "[PROBLEM] This repository-wide review-guidance change is unrelated to the Spotify audiobook seek fix and expands a single-purpose bugfix PR; revert this file and submit the guidance update separately if it is still needed."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 12,
+    "config": "c5",
+    "seed": 2,
+    "pr": 60,
+    "repo": "music-assistant/server",
+    "src_pr": 6063,
+    "author": "marcelveldt",
+    "ground_truth": "INFEASIBLE (maintainer): nothing can open a second stream of the same audiobook while the first is streaming; prebuffer skipped for realtime",
+    "path": "music_assistant/providers/spotify/backends/soloist.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nA stale chapter continuation can reclaim the session after a seek, and the PR also includes an unrelated standards change.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nFixes Spotify Soloist audiobook seeking across chapter boundaries by tracking superseded streams.\n\n**Changes:**\n- Tracks the Music Assistant item served by Soloist channels.\n- Adds superseded-stream handling.\n- Adds regression tests and documentation.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds unrelated review guidance. |\r\n| `music_assistant/providers/spotify/README.md` | Documents seek behavior. |\r\n| `music_assistant/providers/spotify/provider.py` | Stops superseded stream stitching. |\r\n| `music_assistant/providers/spotify/backends/base.py` | Defines the supersession error. |\r\n| `music_assistant/providers/spotify/backends/__init__.py` | Exports the new error. |\r\n| `music_assistant/providers/spotify/backends/soloist.py` | Implements session takeover handling. |\r\n| `tests/providers/spotify/test_soloist_backend.py` | Adds regression coverage. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 7/7 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-12-c5-s2-base?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 114,
+          "body": "[PROBLEM] This review-guidance addition is unrelated to the Spotify audiobook fix and violates the repository's single-purpose PR rule; remove it here and submit it separately."
+        },
+        {
+          "path": "music_assistant/providers/spotify/backends/soloist.py",
+          "line": 608,
+          "body": "[CRITICAL] A seek that lands between audiobook chapters can be undone by the stale stream: after its previous chapter releases, its next `_acquire` call shares the seek's queue/media key, so this condition lets it cut the replacement session and resume old playback. Mark chapter acquisitions that continue an existing stream, reject such a continuation with `StreamSupersededError` when the replacement already serves that item, and add a regression test for this interleaving."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 12,
+    "config": "c5",
+    "seed": 3,
+    "pr": 61,
+    "repo": "music-assistant/server",
+    "src_pr": 6063,
+    "author": "marcelveldt",
+    "ground_truth": "INFEASIBLE (maintainer): nothing can open a second stream of the same audiobook while the first is streaming; prebuffer skipped for realtime",
+    "path": "music_assistant/providers/spotify/backends/soloist.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nA stale chapter continuation can retake the replacement session and undo the seek.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nReproduces the Spotify Soloist fix for audiobook seeks across chapter boundaries.\n\n**Changes:**\n- Tracks media ownership across Soloist channels.\n- Adds superseded-stream signaling and handling.\n- Expands tests and documentation.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds review guidance. |\r\n| `music_assistant/providers/spotify/README.md` | Documents seek takeover behavior. |\r\n| `music_assistant/providers/spotify/provider.py` | Handles superseded streams. |\r\n| `music_assistant/providers/spotify/backends/soloist.py` | Implements media-aware session takeover. |\r\n| `music_assistant/providers/spotify/backends/base.py` | Defines the supersession exception. |\r\n| `music_assistant/providers/spotify/backends/__init__.py` | Exports the exception. |\r\n| `tests/providers/spotify/test_soloist_backend.py` | Adds regression coverage. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 7/7 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-12-c5-s3-base?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": "music_assistant/providers/spotify/backends/soloist.py",
+          "line": 608,
+          "body": "[CRITICAL] This still lets a superseded audiobook stream undo the seek: after its current chapter releases and before it acquires the next chapter, the replacement seek can start a same-queue/same-media session, then the stale continuation matches `serves_only(media_key)` (or `is_playing()` for the same chapter) and takes that new session back. Pass an explicit `continuation` flag for chapters after `start_chapter`, reject a continuation when that same item is already being served, and add a regression test for a seek scheduled between chapter acquisitions."
+        },
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 114,
+          "body": "[PROBLEM] This review-guidance change is unrelated to the Spotify audiobook seek fix; remove it here and submit it separately so the PR remains single-purpose (server#2911)."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 13,
+    "config": "c4",
+    "seed": 0,
+    "pr": 62,
+    "repo": "music-assistant/server",
+    "src_pr": 6075,
+    "author": "marcelveldt",
+    "ground_truth": "REAL (maintainer: 'Good catch, added'): missing albumartists tag misclassifies tagged music as a sound effect and disables Autoplay",
+    "path": "music_assistant/providers/builtin/__init__.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nPlural album-artist tags are misclassified, and the unrelated instructions rewrite should be reverted.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nReproduces the fix for unwanted Autoplay after notification or TTS clips.\n\n**Changes:**\n- Classifies finite, untagged URLs as sound effects.\n- Adds classification and Autoplay regression tests.\n- Rewrites review instructions without semantic changes.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `music_assistant/providers/builtin/__init__.py` | Adds sound-effect URL detection. |\r\n| `tests/providers/builtin/test_sound_effects.py` | Tests URL classification. |\r\n| `tests/controllers/player_queues/test_autoplay_dispatch.py` | Tests sound-effect Autoplay exclusion. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Contains a no-op whole-file rewrite. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 3/4 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-13-c4-s0-base?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 1,
+          "body": "[PROBLEM] This whole-file rewrite makes no semantic change and is unrelated to sound-effect classification; revert it to keep the PR single-purpose and preserve useful blame history."
+        },
+        {
+          "path": "music_assistant/providers/builtin/__init__.py",
+          "line": 1625,
+          "body": "[CRITICAL] Include the plural `albumartists` tag: `AudioTags.album_artists` supports files that expose only this key, but this check classifies them as sound effects and disables Autoplay for valid music."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 13,
+    "config": "c4",
+    "seed": 1,
+    "pr": 63,
+    "repo": "music-assistant/server",
+    "src_pr": 6075,
+    "author": "marcelveldt",
+    "ground_truth": "REAL (maintainer: 'Good catch, added'): missing albumartists tag misclassifies tagged music as a sound effect and disables Autoplay",
+    "path": "music_assistant/providers/builtin/__init__.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nMulti-value album-artist tags can cause real music to be misclassified as a sound effect.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nReproduces #6075\u2019s fix by classifying finite, untagged URLs as sound effects so Autoplay does not continue with unrelated music.\n\n**Changes:**\n- Classifies untagged clips while preserving tracks and radio streams.\n- Adds parsing and Autoplay regression tests.\n- Rewrites an unrelated standards file without semantic changes.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `music_assistant/providers/builtin/__init__.py` | Adds URL classification logic. |\r\n| `tests/providers/builtin/test_sound_effects.py` | Tests URL media-type classification. |\r\n| `tests/controllers/player_queues/test_autoplay_dispatch.py` | Tests sound-effect Autoplay exclusion. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Non-semantic whole-file rewrite. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 3/4 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 1,
+          "body": "[PROBLEM] This whole-file rewrite contains no semantic change and is unrelated to the sound-effect fix, creating avoidable review and blame churn; revert this file from the PR."
+        },
+        {
+          "path": "music_assistant/providers/builtin/__init__.py",
+          "line": 1625,
+          "body": "[CRITICAL] Include the supported plural `albumartists` tag: `AudioTags` uses this key for multi-value Vorbis, ID3, and APEv2 album artists, so these tagged music files are misclassified as sound effects and Autoplay is disabled; add it to this tuple and cover it with a regression case."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 13,
+    "config": "c4",
+    "seed": 2,
+    "pr": 64,
+    "repo": "music-assistant/server",
+    "src_pr": 6075,
+    "author": "marcelveldt",
+    "ground_truth": "REAL (maintainer: 'Good catch, added'): missing albumartists tag misclassifies tagged music as a sound effect and disables Autoplay",
+    "path": "music_assistant/providers/builtin/__init__.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nThe detector omits the supported `albumartists` tag, misclassifying some tagged music as sound effects.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nFixes unwanted Autoplay after notification/TTS clips by classifying untagged URLs as sound effects.\n\n**Changes:**\n- Distinguishes sound effects, tagged tracks, and radio streams.\n- Adds classification and Autoplay regression tests.\n- Rewrites the standards file without semantic changes.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `music_assistant/providers/builtin/__init__.py` | Classifies untagged URLs as sound effects. |\r\n| `tests/providers/builtin/test_sound_effects.py` | Tests URL media classification. |\r\n| `tests/controllers/player_queues/test_autoplay_dispatch.py` | Tests sound-effect Autoplay exclusion. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Rewrites unchanged standards content. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 3/4 changed files\n- **Comments generated:** 1\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-13-c4-s2-base?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": "music_assistant/providers/builtin/__init__.py",
+          "line": 1625,
+          "body": "[CRITICAL] Include the supported plural `albumartists` tag here; `AudioTags.album_artists` handles this key for Vorbis/APEv2, so these tagged songs are misclassified as sound effects and Autoplay is disabled for them."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 13,
+    "config": "c4",
+    "seed": 3,
+    "pr": 65,
+    "repo": "music-assistant/server",
+    "src_pr": 6075,
+    "author": "marcelveldt",
+    "ground_truth": "REAL (maintainer: 'Good catch, added'): missing albumartists tag misclassifies tagged music as a sound effect and disables Autoplay",
+    "path": "music_assistant/providers/builtin/__init__.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nPlural album-artist tags are missed, and unrelated full-file churn should be reverted.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nClassifies finite, untagged builtin URLs as sound effects to prevent Autoplay from adding unrelated music.\n\n**Changes:**\n- Adds music-tag-based URL classification.\n- Tests track, radio, sound-effect, and Autoplay behavior.\n- Includes an unrelated no-op standards-file rewrite.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `music_assistant/providers/builtin/__init__.py` | Implements URL classification. |\r\n| `tests/providers/builtin/test_sound_effects.py` | Tests classification cases. |\r\n| `tests/controllers/player_queues/test_autoplay_dispatch.py` | Tests sound-effect Autoplay exclusion. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Rewrites unchanged content. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 3/4 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": "music_assistant/providers/builtin/__init__.py",
+          "line": 1625,
+          "body": "[CRITICAL] Include the supported plural `albumartists` tag here; Vorbis, ID3, and APEv2 can expose only that key, so this check can misclassify tagged music as a sound effect and disable Autoplay for it."
+        },
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 1,
+          "body": "[PROBLEM] Revert this textually unchanged file from the PR; the no-op full-file rewrite is unrelated to sound-effect classification and adds review/history noise to an otherwise focused bug fix."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 13,
+    "config": "c5",
+    "seed": 0,
+    "pr": 66,
+    "repo": "music-assistant/server",
+    "src_pr": 6075,
+    "author": "marcelveldt",
+    "ground_truth": "REAL (maintainer: 'Good catch, added'): missing albumartists tag misclassifies tagged music as a sound effect and disables Autoplay",
+    "path": "music_assistant/providers/builtin/__init__.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nThe classifier omits the supported plural `albumartists` tag and can misclassify tagged music.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nReproduces #6075\u2019s fix for preventing Autoplay after untagged notification or TTS clips.\n\n**Changes:**\n- Classifies finite, untagged URLs as sound effects.\n- Preserves tagged tracks, radio streams, and explicit track requests.\n- Adds classification and Autoplay regression tests.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `music_assistant/providers/builtin/__init__.py` | Adds URL classification logic. |\r\n| `tests/providers/builtin/test_sound_effects.py` | Tests media-type classification. |\r\n| `tests/controllers/player_queues/test_autoplay_dispatch.py` | Tests sound-effect Autoplay exclusion. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds review guidance for reachable failures. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 4/4 changed files\n- **Comments generated:** 1\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": "music_assistant/providers/builtin/__init__.py",
+          "line": 1625,
+          "body": "[CRITICAL] Include `albumartists`: the tag parsers emit this plural key for Vorbis and APEv2 files, so music carrying only that supported album-artist form is misclassified as a sound effect and Autoplay is disabled."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 13,
+    "config": "c5",
+    "seed": 1,
+    "pr": 67,
+    "repo": "music-assistant/server",
+    "src_pr": 6075,
+    "author": "marcelveldt",
+    "ground_truth": "REAL (maintainer: 'Good catch, added'): missing albumartists tag misclassifies tagged music as a sound effect and disables Autoplay",
+    "path": "music_assistant/providers/builtin/__init__.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nClassification mishandles local files and plural album-artist tags, while the standards update is unrelated.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nReproduces #6075\u2019s fix by classifying untagged URLs as sound effects, preventing autoplay after notification clips.\n\n**Changes:**\n- Classifies builtin URLs using raw music tags.\n- Adds parsing and autoplay tests.\n- Updates review guidance.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `music_assistant/providers/builtin/__init__.py` | Adds sound-effect classification. |\r\n| `tests/providers/builtin/test_sound_effects.py` | Tests URL classification. |\r\n| `tests/controllers/player_queues/test_autoplay_dispatch.py` | Tests sound-effect autoplay exclusion. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds review guidance. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 4/4 changed files\n- **Comments generated:** 3\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": "music_assistant/providers/builtin/__init__.py",
+          "line": 1625,
+          "body": "[CRITICAL] Include `albumartists`: `AudioTags` emits this plural key for multi-valued `ALBUMARTIST` fields (`tests/helpers/test_tags.py:396-398,541-546`), so such tagged music currently falls through as a sound effect."
+        },
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 114,
+          "body": "[PROBLEM] This review-guidance addition is unrelated to the sound-effect/autoplay bugfix and should be moved to a separate PR, as required by the single-purpose rule at line 16."
+        },
+        {
+          "path": "music_assistant/providers/builtin/__init__.py",
+          "line": 704,
+          "body": "[CRITICAL] Restrict this inference to builtin stream URLs: local filesystem paths also arrive as `MediaType.UNKNOWN` (`music_assistant/helpers/uri.py:131-135`), so an untagged local track is now misclassified as a sound effect and loses normal track/autoplay behavior."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 13,
+    "config": "c5",
+    "seed": 2,
+    "pr": 68,
+    "repo": "music-assistant/server",
+    "src_pr": 6075,
+    "author": "marcelveldt",
+    "ground_truth": "REAL (maintainer: 'Good catch, added'): missing albumartists tag misclassifies tagged music as a sound effect and disables Autoplay",
+    "path": "music_assistant/providers/builtin/__init__.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nPlural album-artist tags are misclassified, and an unrelated standards change should be removed.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nReproduces the sound-effect classification fix intended to prevent Autoplay after notification clips.\n\n**Changes:**\n- Classifies finite, untagged URLs as sound effects.\n- Adds classification and Autoplay regression tests.\n- Adds unrelated review guidance.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `music_assistant/providers/builtin/__init__.py` | Adds URL classification logic. |\r\n| `tests/providers/builtin/test_sound_effects.py` | Tests URL media-type detection. |\r\n| `tests/controllers/player_queues/test_autoplay_dispatch.py` | Tests sound-effect Autoplay exclusion. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds unrelated review guidance. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 4/4 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 Configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 114,
+          "body": "[PROBLEM] This review-guidance change is unrelated to the sound-effect/Autoplay fix and violates the single-purpose PR policy; remove it and submit it separately."
+        },
+        {
+          "path": "music_assistant/providers/builtin/__init__.py",
+          "line": 1625,
+          "body": "[CRITICAL] Include the supported plural `albumartists` tag here; Vorbis and APEv2 files can expose only that key (`AudioTags.album_artists` handles it), so this check misclassifies tagged music as a sound effect and disables Autoplay for it."
+        }
+      ]
+    }
+  },
+  {
+    "idx": 13,
+    "config": "c5",
+    "seed": 3,
+    "pr": 69,
+    "repo": "music-assistant/server",
+    "src_pr": 6075,
+    "author": "marcelveldt",
+    "ground_truth": "REAL (maintainer: 'Good catch, added'): missing albumartists tag misclassifies tagged music as a sound effect and disables Autoplay",
+    "path": "music_assistant/providers/builtin/__init__.py",
+    "result": {
+      "n_reviews": 1,
+      "review_body": "### \ud83d\udfe1 Changes recommended\n\nThe inaccurate docstring and unrelated policy-file rewrite should be addressed.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nReproduces the #6075 fix by treating finite, untagged URLs as sound effects so Autoplay does not enqueue unrelated music.\n\n**Changes:**\n- Classifies untagged clips while preserving tracks and radio streams.\n- Adds provider and Autoplay regression tests.\n- Adds unrelated review guidance.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `music_assistant/providers/builtin/__init__.py` | Implements URL classification. |\r\n| `tests/providers/builtin/test_sound_effects.py` | Tests classification behavior. |\r\n| `tests/controllers/player_queues/test_autoplay_dispatch.py` | Tests sound-effect Autoplay exclusion. |\r\n| `.github/instructions/music-assistant-standards.instructions.md` | Adds review guidance. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 4/4 changed files\n- **Comments generated:** 2\n- **Review effort level:** Balanced\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/chrisuthe/server/new/bench-13-c5-s3-base?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "comments": [
+        {
+          "path": ".github/instructions/music-assistant-standards.instructions.md",
+          "line": 114,
+          "body": "[PROBLEM] This review-policy change is unrelated to the notification/Autoplay fix and also rewrites the entire file; revert this file and submit the guidance separately so the bugfix remains single-purpose."
+        },
+        {
+          "path": "music_assistant/providers/builtin/__init__.py",
+          "line": 682,
+          "body": "[PROBLEM] This docstring describes the default `None` path as sound-effect detection, but the condition only runs for `MediaType.UNKNOWN`; calling `parse_item(url)` still returns a `Track`, so document the sentinel explicitly (or align the implementation)."
+        }
+      ]
+    }
+  }
+]
