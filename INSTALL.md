@@ -36,17 +36,28 @@ python scripts/install.py /path/to/the/repo --local-exclude
 
 ## Option C — everywhere (all your projects)
 
-Copy the agent into your user-level agents folder:
+Install into your user-level agents folder, so the sage is available in every project
+without a per-project install:
 
 ```bash
-# macOS / Linux
-mkdir -p ~/.claude/agents && cp agent/ohf-sage.md ~/.claude/agents/
+python scripts/install.py "$HOME" --from-release
 ```
 
 ```powershell
 # Windows (PowerShell)
-New-Item -ItemType Directory -Force $HOME\.claude\agents | Out-Null
-Copy-Item agent\ohf-sage.md $HOME\.claude\agents\
+python scripts\install.py $HOME --from-release
+```
+
+This installs the corpus too, and rewrites the agent's corpus reference to the
+absolute path it landed at — the shipped path is project-relative and would not
+resolve from outside a project.
+
+Copying the agent by hand also works if you'd rather not run Python, but take the
+agent **only** — a hand-copied corpus won't be found, and the agent will report
+empty search results instead of saying the history is missing:
+
+```bash
+mkdir -p ~/.claude/agents && cp agent/ohf-sage.md ~/.claude/agents/
 ```
 
 ## Option D — no clone at all

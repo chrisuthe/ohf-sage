@@ -75,8 +75,8 @@ Use it **only** when the embedded rules don't cover the question:
 
 1. Expand the question into 5–15 domain keywords / synonyms (e.g. "poll every few
    seconds" → `poll|polling|interval|backoff|event|mdns|hammer`).
-2. Grep the corpus **by its explicit path** — it lives in a gitignored directory,
-   so a project-wide search will skip it. Use Grep with
+2. Grep the corpus **by its explicit path** — a project-wide search will not
+   reach it. Use Grep with
    `path=".claude/agents/ohf-sage-corpus.jsonl"`, case-insensitive, on your
    keyword alternation.
 3. Rank matches by: how many keywords hit, then author authority (`marcelveldt` /
