@@ -22,6 +22,8 @@ repos:
     focus: wont_support
   - repo: music-assistant/frontend
     authorities: [MarvinSchenkel]
+  - repo: music-assistant/models
+    authorities: [MarvinSchenkel]
   - repo: music-assistant/mobile-app
     authorities: [MarvinSchenkel]
   - repo: music-assistant/desktop-app
