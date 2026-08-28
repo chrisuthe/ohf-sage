@@ -1,5 +1,5 @@
 ---
-applyTo: "**/*.{ts,vue}"
+applyTo: "**/*.ts,**/*.vue"
 ---
 
 <!-- Generated from mined PR-review precedents; additive to the repo's README "Development Guidelines". -->

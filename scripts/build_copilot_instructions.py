@@ -49,11 +49,13 @@ GUARDS = (
 )
 
 # Cross-repo awareness: a server change can silently break the Vue/TS frontend, which is a
-# client of this API. Directs the reviewer to read the frontend (via the default GitHub MCP)
-# when a PR touches the client contract.
+# client of this API. Emitted as its OWN repo-wide (`applyTo: "**"`) instruction file, not
+# appended to the Python-scoped shard — a contract change (e.g. a music-assistant-models bump
+# in pyproject.toml) can land in a non-.py file the shard would never load for.
+CROSS_REPO_FRONTMATTER = '---\napplyTo: "**"\n---\n\n'
 CROSS_REPO_FRONTEND = (
-    "---\n\n"
-    "## Cross-repo: the frontend is a client of this API\n\n"
+    "<!-- Generated; additive to copilot-instructions.md + AGENTS.md. -->\n"
+    "# Cross-repo: the frontend is a client of this API\n\n"
     "The Music Assistant web frontend (`music-assistant/frontend`, Vue/TypeScript) consumes "
     "this server's API commands, shared models, and wire/streaming contract, so a server change "
     "can break it silently. When a PR changes an API command, a shared model, the wire "
@@ -61,8 +63,9 @@ CROSS_REPO_FRONTEND = (
     "- **Read the frontend before assuming it is unaffected.** Use the GitHub MCP to inspect "
     "`music-assistant/frontend` — its code and its open PRs — for how the changed command, "
     "field, or model is consumed, and flag a break or a needed companion change.\n"
-    "- The frontend **gates newer-server commands on `schema_version`**, so a client-facing "
-    "addition needs the schema bump (see the `API_SCHEMA_VERSION` rule above). "
+    "- The frontend **gates newer-server commands on `schema_version`**, so a backwards-"
+    "incompatible client-facing addition — a new or changed API command, a shared-model change, "
+    "or a new remote-access channel label — must bump `API_SCHEMA_VERSION`. "
     "([frontend#1911](https://github.com/music-assistant/frontend/pull/1911#discussion_r3408564733): "
     "\"setLocale now checks the server's schema_version and skips the command on servers < 32\")\n"
     "- Behavior **all API clients need** (volume, queue, filtering) belongs in the server, not "
@@ -126,7 +129,14 @@ def build(standards_path: str, out_path: str) -> str:
             continue
         kept.append(line)  # headers, section intros, rules, dividers
     body = "\n".join(_prune_empty_subsections(kept)).strip("\n")
-    result = FRONTMATTER + PREAMBLE + body + "\n\n" + CROSS_REPO_FRONTEND + "\n" + GUARDS
+    result = FRONTMATTER + PREAMBLE + body + "\n\n" + GUARDS
+    Path(out_path).write_text(result, encoding="utf-8")
+    return result
+
+
+def build_cross_repo(out_path: str) -> str:
+    """Write the repo-wide cross-repo frontend-awareness instruction file."""
+    result = CROSS_REPO_FRONTMATTER + CROSS_REPO_FRONTEND
     Path(out_path).write_text(result, encoding="utf-8")
     return result
 
@@ -137,8 +147,10 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[1]
     standards = argv[0] if len(argv) > 0 else root / "agent/music-assistant-review-bot.md"
     out = argv[1] if len(argv) > 1 else root / "agent/music-assistant-standards.instructions.md"
+    cross = root / "agent/music-assistant-cross-repo.instructions.md"
     build(str(standards), str(out))
-    print(f"wrote {out}")
+    build_cross_repo(str(cross))
+    print(f"wrote {out}\nwrote {cross}")
     return 0
 
 
