@@ -106,6 +106,30 @@ CROSS_REPO_MODELS = (
     "ones.\n"
 )
 
+# PR-description quality: enforce the AI Policy + template. Repo-wide (`applyTo: "**"`), its own
+# file — the description applies to every PR regardless of which files change.
+PR_DESCRIPTION_FRONTMATTER = '---\napplyTo: "**"\n---\n\n'
+PR_DESCRIPTION = (
+    "<!-- Generated; additive to copilot-instructions.md + AGENTS.md. -->\n"
+    "# Pull request description\n\n"
+    'The "What does this implement/fix?" description must be short, specific, and in the '
+    "author's own words — a few sentences on what actually changed and, for a fix, the concrete "
+    "problem it resolves. The project's "
+    "[AI Policy](https://github.com/music-assistant/.github/blob/main/AI_POLICY.md) requires this "
+    '("keep responses to the minimum needed to communicate your intent"; review any AI-assisted '
+    'summary for technical accuracy), and the PR template asks for a "quick description."\n\n'
+    "Raise a `[PROBLEM]` when the description:\n\n"
+    "- is a long AI-style essay, or a speculative root-cause narrative (often wrong), instead of "
+    "a concise statement of the actual change;\n"
+    "- adds sections beyond the PR template (e.g. Summary, Changes, Testing, Impact) — the "
+    "template is used as-is, and bypassing or inflating it violates the AI Policy;\n"
+    "- is vague or generic, or does not match what the diff actually changes.\n\n"
+    "When you raise it, say: \"This needs to more clearly describe the issue you're having and "
+    'what it\'s fixing," name any extra template sections to remove, and you may offer one concise '
+    "rewrite (a few sentences) the author can validate and use. Judge the description, not the "
+    "author.\n"
+)
+
 
 def _is_rule(line: str) -> bool:
     return line.lstrip().startswith("- **")
@@ -169,6 +193,13 @@ def build_cross_repo(out_path: str) -> str:
     return result
 
 
+def build_pr_description(out_path: str) -> str:
+    """Write the repo-wide PR-description-quality instruction file."""
+    result = PR_DESCRIPTION_FRONTMATTER + PR_DESCRIPTION
+    Path(out_path).write_text(result, encoding="utf-8")
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI: build_copilot_instructions.py [standards.md] [out.instructions.md]."""
     argv = argv or sys.argv[1:]
@@ -176,9 +207,11 @@ def main(argv: list[str] | None = None) -> int:
     standards = argv[0] if len(argv) > 0 else root / "agent/music-assistant-review-bot.md"
     out = argv[1] if len(argv) > 1 else root / "agent/music-assistant-standards.instructions.md"
     cross = root / "agent/music-assistant-cross-repo.instructions.md"
+    pr_desc = root / "agent/music-assistant-pr-description.instructions.md"
     build(str(standards), str(out))
     build_cross_repo(str(cross))
-    print(f"wrote {out}\nwrote {cross}")
+    build_pr_description(str(pr_desc))
+    print(f"wrote {out}\nwrote {cross}\nwrote {pr_desc}")
     return 0
 
 
