@@ -121,8 +121,10 @@ PR_DESCRIPTION = (
     "Raise a `[PROBLEM]` when the description:\n\n"
     "- is a long AI-style essay, or a speculative root-cause narrative (often wrong), instead of "
     "a concise statement of the actual change;\n"
-    "- adds sections beyond the PR template (e.g. Summary, Changes, Testing, Impact) — the "
-    "template is used as-is, and bypassing or inflating it violates the AI Policy;\n"
+    "- adds superfluous sections beyond the PR template (e.g. Summary, Testing, Impact, a "
+    'separate "Root Cause" essay) — the template is used as-is. A short bulleted list of the '
+    "changes is fine here (the maintainers' release notes reference it); a wall of extra headings "
+    "is not;\n"
     "- is vague or generic, or does not match what the diff actually changes.\n\n"
     "When you raise it, say: \"This needs to more clearly describe the issue you're having and "
     'what it\'s fixing," name any extra template sections to remove, and you may offer one concise '
