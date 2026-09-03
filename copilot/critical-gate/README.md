@@ -1,64 +1,59 @@
 # Critical review gate
 
-A tiny, **deterministic** GitHub Actions workflow that turns a `[CRITICAL]` finding from
-Copilot's automated review into a real merge block. When Copilot posts a review containing a
-`[CRITICAL]` item, it:
+Two small workflows that turn a `[CRITICAL]` finding from Copilot's automated review into a real
+merge block on `music-assistant/server`: the PR is **converted to a draft** (a draft PR cannot be
+merged) with one comment saying why. The intent is to stop still-being-worked-on PRs from sitting
+in the "ready to merge" state.
 
-1. **converts the PR to a draft** — a draft PR *cannot* be merged (the hard gate), and
-2. **submits a request-changes review** whose body explains that it did so and why.
+Deterministic glue, **not** a reviewer: it reacts to Copilot's own verdict, it does not judge the
+code. No model, no secrets, and it checks out no PR code — it only substring-matches `[CRITICAL]`.
 
-The intent: stop still-being-worked-on PRs from sitting in the "ready to merge" state.
+## Why two workflows (the fork-token constraint)
 
-## How this differs from `../cli-reviewer/`
+Drafting a PR is a **write**. On a public repo, a `pull_request_review` workflow triggered by a
+**fork** PR gets a **read-only** `GITHUB_TOKEN` — GitHub downgrades it exactly as it does for
+`pull_request`. (Only `pull_request_target` and `workflow_run` get a write token for fork PRs, and
+the "send write tokens to fork PRs" setting is private-repo-only.) A single `pull_request_review`
+workflow would therefore silently fail on every external contribution — the very PRs the gate most
+needs to cover. So it is split:
 
-| | `cli-reviewer/` | `critical-gate/` (this) |
-|---|---|---|
-| What it is | A full LLM reviewer (greps the mined corpus, cites leads) | Glue that reacts to Copilot's *own* review |
-| Determinism | Non-deterministic (a model) — **advisory only** | Deterministic (a substring match) — safe to **enforce** |
-| Reviews the code? | Yes | No — it only reads Copilot's verdict |
-| Cost | Copilot AI credits + Actions minutes | A few seconds of Actions minutes |
+| File | Trigger | Token | Role |
+|---|---|---|---|
+| `critical-gate-detect.yml` | `pull_request_review` | read-only | Scan the review for `[CRITICAL]`; if found, upload the PR number as an artifact. |
+| `critical-gate-enforce.yml` | `workflow_run` (after detect) | **read/write** | Download the artifact; convert that PR to a draft + comment. |
 
-They compose: the `[CRITICAL]` taxonomy this gate keys on is produced by Copilot's *native*
-review under our instruction shards (`music-assistant-standards.instructions.md` et al.). This
-gate is only the enforcement layer on top of that verdict.
+`workflow_run` is GitHub's documented pattern for doing trusted writes in response to untrusted
+fork activity: it runs in the base-repo context with a write token even when the upstream run was
+fork-originated. The PR number is passed via artifact because `workflow_run.pull_requests` is empty
+for fork PRs.
 
 ## Install
 
-Copy `critical-gate.yml` to `.github/workflows/critical-gate.yml` **on the branch PRs target**
-(for `music-assistant/server` that is `dev`). A `pull_request_review` workflow only takes effect
-from the base branch, so it must be merged there — it will not run from a PR's own head.
+Copy both files to `.github/workflows/` **on the branch PRs target** (`dev` for
+`music-assistant/server`). A `pull_request_review` / `workflow_run` workflow only takes effect from
+the base branch, so both must be merged there — they will not run from a PR's own head. No secrets,
+no PAT: the default `GITHUB_TOKEN` suffices.
 
-No secrets, no PAT: it uses the default `GITHUB_TOKEN` with `pull-requests: write`.
+**Prerequisite:** Copilot automatic code review must be enabled, so a review is submitted (that
+submission fires the detect stage) carrying the `[CRITICAL]`/`[PROBLEM]`/`[SUGGESTION]` taxonomy.
 
-**Prerequisite:** Copilot automatic code review must be enabled on the repo, so a review is
-actually *submitted* (that submission is what fires the workflow) and carries the
-`[CRITICAL]`/`[PROBLEM]`/`[SUGGESTION]` taxonomy.
-
-## Behaviour & tuning
+## Behaviour
 
 - **Only `[CRITICAL]` gates.** `[PROBLEM]`/`[SUGGESTION]` are left as ordinary review comments.
-- **Draft = hard block; request-changes = soft signal.** A draft PR can't be merged at all. The
-  request-changes review is the visible "why" and, if branch protection requires review approval /
-  resolved conversations, an additional gate — otherwise it's advisory. You control that via branch
-  protection.
-- **False-positive escape hatch:** add the **`override-critical`** label to a PR and the gate
-  skips it. Create that label in the repo (any colour) if you want it available.
-- **Idempotent:** if the PR is already a draft (already gated, or author-drafted), the gate does
+- **Draft is the whole gate.** No review-state is set (see "Not yet" below), so there is nothing to
+  get stuck; the author clears the block themselves by clicking **Ready for review**.
+- **False-positive escape hatch:** add the **`override-critical`** label and the gate skips the PR.
+  Create that label in the repo (any colour) to make it available.
+- **Idempotent:** if the PR is already a draft (already gated, or author-drafted), enforce does
   nothing — it won't re-post.
+- **Paginated detection:** the review's inline comments are read across all pages, so a `[CRITICAL]`
+  beyond the first 30 comments is not missed.
 
-## Why `pull_request_review`
+## Not yet (deferred by design)
 
-`pull_request` workflows get a **read-only** token for PRs from forks, so they can't draft a PR or
-post a review — which is exactly why `cli-reviewer` warns about forks. `pull_request_review` is a
-*trusted* event that runs in the base repo with a **writable** token even for fork PRs, so this
-gate covers outside contributions too. It is safe to trust here because it **checks out no PR code**
-and only substring-matches `[CRITICAL]` — none of the code-execution surface that makes trusted
-events risky.
-
-## Not in v1 (deliberately)
-
-- **Auto-recovery.** When the author fixes the issue and Copilot's next review is clean, the gate
-  does nothing — un-drafting stays a human "Ready for review" action, so a re-fired critical can't
-  fight the author. To auto-clear the stale request-changes review, enable **"Dismiss stale pull
-  request approvals when new commits are pushed"** in branch protection, or add a follow-up step
-  that dismisses the bot's prior review on a clean re-review.
+- **A "changes requested" review + its lifecycle.** `dev`'s ruleset requires an approving review and
+  has `dismiss_stale_reviews_on_push: false`, so a bot request-changes review would persist and keep
+  the PR blocked after the author re-readies — nothing the author does (resolving threads, pushing a
+  fix, a fresh clean Copilot review by a *different* bot identity) dismisses it. Adding the review
+  state safely means also building an auto-dismiss step (dismiss the bot's stale review on a later
+  clean review). Draft-only avoids that entirely for now.
