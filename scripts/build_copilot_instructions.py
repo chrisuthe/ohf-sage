@@ -46,6 +46,17 @@ GUARDS = (
     "- **No `await`, no race.** Do not report a TOCTOU / check-then-act race unless there is a real "
     "suspension point (`await`) between the check and the mutation. Single-threaded asyncio runs "
     "code with no `await` between them atomically, so nothing can interleave.\n"
+    "- **`except A, B:` without parentheses is valid Python 3.14 (PEP 758).** Catching multiple "
+    "exception types without parentheses — `except MediaNotFoundError, AudioError:` (and "
+    "`except* A, B:`) — is standard syntax as of Python 3.14 (PEP 758), which this repo targets "
+    "(`requires-python >= 3.14`). It is NOT the removed Python-2 `except E, name:` binding form and "
+    "is NOT a syntax error; do not flag it or suggest adding parentheses. Parentheses remain "
+    "required only when an `as` clause is present: `except (A, B) as e:`.\n"
+    "- **Valid modern Python is not a syntax error — the target is 3.14.** `pyproject.toml` pins "
+    "`requires-python >= 3.14`, and CI runs that interpreter plus ruff and mypy, so anything that "
+    "would not parse is already red in CI. Do not report recent-but-valid syntax as invalid: PEP 695 "
+    "`type X = ...` aliases and `def f[T](...)` type parameters (3.12), PEP 701 nested f-strings "
+    "(3.12), and PEP 758 parenthesis-less `except` (3.14, above).\n"
 )
 
 # Cross-repo awareness: a server change can silently break the Vue/TS frontend, which is a
