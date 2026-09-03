@@ -6,61 +6,68 @@ merged) with one comment saying why. The intent is to stop still-being-worked-on
 in the "ready to merge" state.
 
 Deterministic glue, **not** a reviewer: it reacts to Copilot's own verdict, it does not judge the
-code. No model, no secrets, and it checks out no PR code — it only substring-matches `[CRITICAL]`.
+code. No model, no secrets, and it checks out no PR code.
 
 ## Why two workflows (the fork-token constraint)
 
 Drafting a PR is a **write**. On a public repo, a `pull_request_review` workflow triggered by a
-**fork** PR gets a **read-only** `GITHUB_TOKEN` — GitHub downgrades it exactly as it does for
-`pull_request`. (Only `pull_request_target` and `workflow_run` get a write token for fork PRs, and
-the "send write tokens to fork PRs" setting is private-repo-only.) A single `pull_request_review`
-workflow would therefore silently fail on every external contribution — the very PRs the gate most
-needs to cover. So it is split:
+**fork** PR gets a **read-only** `GITHUB_TOKEN` — GitHub downgrades it exactly as for
+`pull_request`, and the same fork also runs its own copy of the workflow. So a single
+`pull_request_review` workflow could neither write nor be trusted. It is split:
 
 | File | Trigger | Token | Role |
 |---|---|---|---|
-| `critical-gate-detect.yml` | `pull_request_review` | read-only | Scan the review for `[CRITICAL]`; if found, upload the PR number as an artifact. |
-| `critical-gate-enforce.yml` | `workflow_run` (after detect) | **read/write** | Download the artifact; convert that PR to a draft + comment. |
+| `critical-gate-detect.yml` | `pull_request_review` | read-only, untrusted | Scan the review for `[CRITICAL]`; if found, upload a bare **hint** artifact. |
+| `critical-gate-enforce.yml` | `workflow_run` (after detect) | **read/write**, trusted | Resolve the PR from the trusted `head_sha`, re-verify the finding, draft + comment. |
 
-`workflow_run` is GitHub's documented pattern for doing trusted writes in response to untrusted
-fork activity: it runs in the base-repo context with a write token even when the upstream run was
-fork-originated. The PR number is passed via artifact because `workflow_run.pull_requests` is empty
-for fork PRs.
+`workflow_run` is GitHub's documented pattern for trusted writes in response to untrusted fork
+activity: it runs in the base-repo context with a write token even when the upstream run was
+fork-originated.
+
+## Security: nothing from detect is trusted
+
+Because a fork PR runs its own copy of `critical-gate-detect.yml`, its output is attacker-controlled.
+So enforce treats the artifact as a mere **existence hint** ("worth checking") and **re-derives every
+fact**:
+
+- The PR is resolved from **`workflow_run.head_sha`** — which GitHub stamps on the event and a fork
+  cannot forge — via `listPullRequestsAssociatedWithCommit`, filtered to open PRs whose current head
+  still equals that SHA. This mirrors the repo's own `dependency-security-report.yml`.
+- The `[CRITICAL]` finding is **re-checked** against that PR's latest Copilot review (paginated). A
+  forged or absent artifact can therefore only make enforce do nothing — never draft a victim PR.
 
 ## Install
 
 Copy both files to `.github/workflows/` **on the branch PRs target** (`dev` for
-`music-assistant/server`). A `pull_request_review` / `workflow_run` workflow only takes effect from
-the base branch, so both must be merged there — they will not run from a PR's own head. No secrets,
-no PAT: the default `GITHUB_TOKEN` suffices.
+`music-assistant/server`). `pull_request_review` / `workflow_run` workflows only take effect from
+the base branch, so both must be merged there. No secrets, no PAT: the default `GITHUB_TOKEN`
+suffices.
 
 **Prerequisite:** Copilot automatic code review must be enabled, so a review is submitted (that
-submission fires the detect stage) carrying the `[CRITICAL]`/`[PROBLEM]`/`[SUGGESTION]` taxonomy.
+submission fires detect) carrying the `[CRITICAL]`/`[PROBLEM]`/`[SUGGESTION]` taxonomy.
 
 ## Behaviour
 
 - **Only `[CRITICAL]` gates.** `[PROBLEM]`/`[SUGGESTION]` are left as ordinary review comments.
-- **Draft is the whole gate.** No review-state is set (see "Not yet" below), so there is nothing to
-  get stuck; the author clears the block themselves by clicking **Ready for review**.
+- **Draft is the gate.** No review-state is set (see "Not yet"), so there is nothing to get stuck;
+  the author clears the draft themselves via **Ready for review**.
+- **Head-checked:** enforce only acts if the PR's current head still equals the reviewed `head_sha`,
+  so it won't draft a commit the author has already fixed and re-pushed.
+- **Idempotent:** the draft happens only if the PR isn't already one, and the explanation carries a
+  hidden marker so it's posted at most once — even across reruns.
 - **False-positive escape hatch:** add the **`override-critical`** label and the gate skips the PR.
   Create that label in the repo (any colour) to make it available.
-- **Re-validates before acting:** because detect and enforce are separated in time, enforce checks
-  the PR's *current* head SHA (against the reviewed one), open state, and override label immediately
-  before drafting — so it won't draft a commit the author has already fixed and re-pushed.
-- **Idempotent:** the draft happens only if the PR isn't already a draft, and the explanation carries
-  a hidden marker so it's posted at most once — even if an earlier run drafted the PR but failed
-  before commenting.
-- **Fails loudly, not silently:** enforce preflights whether the request artifact exists (absent =
-  expected no-op); a genuine download failure then surfaces as a failed run instead of quietly
-  skipping a real critical.
-- **Paginated detection:** the review's inline comments are read across all pages, so a `[CRITICAL]`
-  beyond the first 30 comments is not missed.
+- **Paginated detection:** review comments are read across all pages, so a `[CRITICAL]` beyond the
+  first 30 comments is not missed.
 
 ## Not yet (deferred by design)
 
-- **A "changes requested" review + its lifecycle.** `dev`'s ruleset requires an approving review and
-  has `dismiss_stale_reviews_on_push: false`, so a bot request-changes review would persist and keep
-  the PR blocked after the author re-readies — nothing the author does (resolving threads, pushing a
-  fix, a fresh clean Copilot review by a *different* bot identity) dismisses it. Adding the review
-  state safely means also building an auto-dismiss step (dismiss the bot's stale review on a later
-  clean review). Draft-only avoids that entirely for now.
+- **A durable gate.** A draft PR can be re-readied by its author, so draft alone is a soft signal,
+  not an unbypassable block. The durable version is a **required commit status** that stays failing
+  until the finding is resolved or `override-critical` is applied — the same mechanism the repo's
+  `Dependency Security Review` uses — which additionally requires adding that status to the branch
+  ruleset's required checks.
+- **A request-changes review + its dismissal lifecycle.** `dev`'s ruleset has
+  `dismiss_stale_reviews_on_push: false`, so a bot request-changes review would persist and keep the
+  PR blocked after the author re-readies; adding it safely means also auto-dismissing the stale
+  review on a later clean review.
