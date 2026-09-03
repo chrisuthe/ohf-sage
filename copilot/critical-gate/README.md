@@ -44,8 +44,15 @@ submission fires the detect stage) carrying the `[CRITICAL]`/`[PROBLEM]`/`[SUGGE
   get stuck; the author clears the block themselves by clicking **Ready for review**.
 - **False-positive escape hatch:** add the **`override-critical`** label and the gate skips the PR.
   Create that label in the repo (any colour) to make it available.
-- **Idempotent:** if the PR is already a draft (already gated, or author-drafted), enforce does
-  nothing — it won't re-post.
+- **Re-validates before acting:** because detect and enforce are separated in time, enforce checks
+  the PR's *current* head SHA (against the reviewed one), open state, and override label immediately
+  before drafting — so it won't draft a commit the author has already fixed and re-pushed.
+- **Idempotent:** the draft happens only if the PR isn't already a draft, and the explanation carries
+  a hidden marker so it's posted at most once — even if an earlier run drafted the PR but failed
+  before commenting.
+- **Fails loudly, not silently:** enforce preflights whether the request artifact exists (absent =
+  expected no-op); a genuine download failure then surfaces as a failed run instead of quietly
+  skipping a real critical.
 - **Paginated detection:** the review's inline comments are read across all pages, so a `[CRITICAL]`
   beyond the first 30 comments is not missed.
 
