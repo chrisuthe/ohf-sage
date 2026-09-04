@@ -35,10 +35,13 @@ no PAT: the default `GITHUB_TOKEN` with `pull-requests: write` suffices.
 
 - **Only `[CRITICAL]` gates.** `[PROBLEM]`/`[SUGGESTION]` are ignored.
 - **Scoped to mergeable bases** (`dev`, `stable`).
-- **Latest review, unresolved findings only:** it gates on **unresolved, non-outdated** `[CRITICAL]`
-  threads from the **latest** Copilot review (matched by review `databaseId`, which also pins the
-  reviewer to the exact Copilot bot — no username substring). A resolved critical, one whose code the
-  author has since changed, or one from an older review Copilot didn't re-raise no longer gates. The
+- **Recent, unresolved findings only:** it gates on **unresolved, non-outdated** `[CRITICAL]` threads
+  whose Copilot review was posted within the last **~30 minutes** (a tunable window, matched to the
+  exact Copilot bot login — no username substring). Recency, not "latest review", keeps the poller a
+  *responder* to fresh criticals rather than a perpetual enforcer that re-drafts an old, ignored
+  critical forever. A resolved critical, one whose code the author has since changed, or one that has
+  aged past the window no longer gates — and dev's `required_review_thread_resolution` ruleset still
+  blocks merging any PR with an unresolved thread, so an aged-out critical still can't be merged. The
   review summary body is ignored (it has no resolved state to clear).
 - **Draft first, fail closed:** the draft (the gate) happens before the comment, and a failure fails
   the run rather than leaving a PR silently ungated.
