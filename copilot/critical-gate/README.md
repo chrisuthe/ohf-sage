@@ -34,13 +34,15 @@ no PAT: the default `GITHUB_TOKEN` with `pull-requests: write` suffices.
 ## Behaviour
 
 - **Only `[CRITICAL]` gates.** `[PROBLEM]`/`[SUGGESTION]` are ignored.
-- **Scoped to mergeable bases** (`dev`, `stable`) and to **non-draft** PRs.
-- **Current-head only:** it acts only when Copilot's latest review is on the PR's current head, so a
-  pushed-but-not-yet-re-reviewed fix isn't drafted on a stale finding.
+- **Scoped to mergeable bases** (`dev`, `stable`).
+- **Unresolved findings only:** it gates on **unresolved, non-outdated** Copilot `[CRITICAL]` review
+  *threads* (queried via GraphQL), so a resolved critical — or one whose code the author has since
+  changed — no longer gates. The review summary body is ignored (it has no resolved state to clear).
 - **Draft first, fail closed:** the draft (the gate) happens before the comment, and a failure fails
   the run rather than leaving a PR silently ungated.
-- **Idempotent:** already-draft PRs are skipped, and the explanation carries a hidden marker so it is
-  posted at most once.
+- **Idempotent & self-repairing:** the draft happens only if the PR isn't already one; the
+  explanation carries a hidden marker so it is posted at most once, and a later poll re-posts it if
+  an earlier run drafted the PR but failed to comment.
 - **More persistent than a one-shot:** because it re-scans every ~10 min, a PR re-readied by its
   author while a `[CRITICAL]` is still unresolved is drafted again on the next pass.
 - **False-positive escape hatch:** add the **`override-critical`** label and the gate skips the PR.
