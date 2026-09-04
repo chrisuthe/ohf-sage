@@ -1,64 +1,65 @@
 # Critical review gate
 
-A tiny, **deterministic** GitHub Actions workflow that turns a `[CRITICAL]` finding from
-Copilot's automated review into a real merge block. When Copilot posts a review containing a
-`[CRITICAL]` item, it:
+A single scheduled workflow that turns a `[CRITICAL]` finding from Copilot's automated review into a
+real merge block on `music-assistant/server`: every ~10 minutes it scans open non-draft PRs and
+**converts to a draft** (a draft PR cannot be merged) any whose latest Copilot review still carries
+an unresolved `[CRITICAL]`, leaving one explanatory comment. The intent is to keep
+still-being-worked-on PRs out of the "ready to merge" state.
 
-1. **converts the PR to a draft** — a draft PR *cannot* be merged (the hard gate), and
-2. **submits a request-changes review** whose body explains that it did so and why.
+Deterministic glue, **not** a reviewer: it reacts to Copilot's own verdict, it does not judge the
+code.
 
-The intent: stop still-being-worked-on PRs from sitting in the "ready to merge" state.
+## Why a poller (and not an event trigger)
 
-## How this differs from `../cli-reviewer/`
+The obvious design — trigger on `pull_request_review` when Copilot posts a review — does not work:
+**GitHub holds workflow runs triggered by a bot/app actor (which is what Copilot submitting a review
+is) for manual approval.** They sit at `action_required` and never execute, so the gate never fires
+— even for same-repo PRs, with no owner bypass. A poller avoids this because a `schedule` run
+executes as a trusted actor. That single choice also sidesteps two other walls the event design hit:
 
-| | `cli-reviewer/` | `critical-gate/` (this) |
-|---|---|---|
-| What it is | A full LLM reviewer (greps the mined corpus, cites leads) | Glue that reacts to Copilot's *own* review |
-| Determinism | Non-deterministic (a model) — **advisory only** | Deterministic (a substring match) — safe to **enforce** |
-| Reviews the code? | Yes | No — it only reads Copilot's verdict |
-| Cost | Copilot AI credits + Actions minutes | A few seconds of Actions minutes |
-
-They compose: the `[CRITICAL]` taxonomy this gate keys on is produced by Copilot's *native*
-review under our instruction shards (`music-assistant-standards.instructions.md` et al.). This
-gate is only the enforcement layer on top of that verdict.
+- **Fork tokens** — a `pull_request_review` run on a fork PR gets a read-only token, so it cannot
+  draft anything. A scheduled run is base-context and keeps its write token.
+- **Artifact trust** — the two-stage `workflow_run` workaround had to pass the PR across a trust
+  boundary. The poller reads everything first-hand, so there is nothing to forge.
 
 ## Install
 
-Copy `critical-gate.yml` to `.github/workflows/critical-gate.yml` **on the branch PRs target**
-(for `music-assistant/server` that is `dev`). A `pull_request_review` workflow only takes effect
-from the base branch, so it must be merged there — it will not run from a PR's own head.
+Copy `critical-gate-poll.yml` to `.github/workflows/critical-gate-poll.yml` on the default branch
+(`dev` for `music-assistant/server`) — scheduled workflows run from the default branch. No secrets,
+no PAT: the default `GITHUB_TOKEN` with `pull-requests: write` suffices.
 
-No secrets, no PAT: it uses the default `GITHUB_TOKEN` with `pull-requests: write`.
+**Prerequisite:** Copilot automatic code review must be enabled, so reviews carrying the
+`[CRITICAL]`/`[PROBLEM]`/`[SUGGESTION]` taxonomy exist to scan.
 
-**Prerequisite:** Copilot automatic code review must be enabled on the repo, so a review is
-actually *submitted* (that submission is what fires the workflow) and carries the
-`[CRITICAL]`/`[PROBLEM]`/`[SUGGESTION]` taxonomy.
+## Behaviour
 
-## Behaviour & tuning
+- **Only `[CRITICAL]` gates.** `[PROBLEM]`/`[SUGGESTION]` are ignored.
+- **Scoped to mergeable bases** (`dev`, `stable`).
+- **Recent, unresolved findings only:** it gates on **unresolved, non-outdated** `[CRITICAL]` threads
+  whose Copilot review was posted within the last **~30 minutes** (a tunable window, matched to the
+  exact Copilot bot login — no username substring). Recency, not "latest review", keeps the poller a
+  *responder* to fresh criticals rather than a perpetual enforcer that re-drafts an old, ignored
+  critical forever. A resolved critical, one whose code the author has since changed, or one that has
+  aged past the window no longer gates — and dev's `required_review_thread_resolution` ruleset still
+  blocks merging any PR with an unresolved thread, so an aged-out critical still can't be merged. The
+  review summary body is ignored (it has no resolved state to clear).
+- **Draft first, fail closed:** the draft (the gate) happens before the comment, and a failure fails
+  the run rather than leaving a PR silently ungated.
+- **Idempotent & self-repairing:** the draft happens only if the PR isn't already one; the
+  explanation carries a hidden marker (matched together with the gate's own bot author, so a quoted
+  marker can't suppress it) so it is posted at most once, and a later poll re-posts it if an earlier
+  run drafted the PR but failed to comment.
+- **More persistent than a one-shot:** because it re-scans every ~10 min, a PR re-readied by its
+  author while a `[CRITICAL]` is still unresolved is drafted again on the next pass.
+- **False-positive escape hatch:** add the **`override-critical`** label and the gate skips the PR.
+  Create that label in the repo (any colour) to make it available.
+- **Test it:** the workflow also has a `workflow_dispatch` trigger — run it manually (a human actor,
+  no approval) to exercise it immediately.
 
-- **Only `[CRITICAL]` gates.** `[PROBLEM]`/`[SUGGESTION]` are left as ordinary review comments.
-- **Draft = hard block; request-changes = soft signal.** A draft PR can't be merged at all. The
-  request-changes review is the visible "why" and, if branch protection requires review approval /
-  resolved conversations, an additional gate — otherwise it's advisory. You control that via branch
-  protection.
-- **False-positive escape hatch:** add the **`override-critical`** label to a PR and the gate
-  skips it. Create that label in the repo (any colour) if you want it available.
-- **Idempotent:** if the PR is already a draft (already gated, or author-drafted), the gate does
-  nothing — it won't re-post.
+## Not yet (deferred by design)
 
-## Why `pull_request_review`
-
-`pull_request` workflows get a **read-only** token for PRs from forks, so they can't draft a PR or
-post a review — which is exactly why `cli-reviewer` warns about forks. `pull_request_review` is a
-*trusted* event that runs in the base repo with a **writable** token even for fork PRs, so this
-gate covers outside contributions too. It is safe to trust here because it **checks out no PR code**
-and only substring-matches `[CRITICAL]` — none of the code-execution surface that makes trusted
-events risky.
-
-## Not in v1 (deliberately)
-
-- **Auto-recovery.** When the author fixes the issue and Copilot's next review is clean, the gate
-  does nothing — un-drafting stays a human "Ready for review" action, so a re-fired critical can't
-  fight the author. To auto-clear the stale request-changes review, enable **"Dismiss stale pull
-  request approvals when new commits are pushed"** in branch protection, or add a follow-up step
-  that dismisses the bot's prior review on a clean re-review.
+- **A durable required-status gate.** A draft can be re-readied, so it is a soft (if self-healing)
+  signal, not an unbypassable block. The durable version is a required commit status that stays
+  failing until the finding is resolved or `override-critical` is applied — the mechanism the repo's
+  `Dependency Security Review` uses — which additionally needs that status added to the branch
+  ruleset's required checks.
