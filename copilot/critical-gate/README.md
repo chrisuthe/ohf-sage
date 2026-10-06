@@ -25,8 +25,17 @@ executes as a trusted actor. That single choice also sidesteps two other walls t
 ## Install
 
 Copy `critical-gate-poll.yml` to `.github/workflows/critical-gate-poll.yml` on the default branch
-(`dev` for `music-assistant/server`) — scheduled workflows run from the default branch. No secrets,
-no PAT: the default `GITHUB_TOKEN` with `pull-requests: write` suffices.
+(`dev` for `music-assistant/server`) — scheduled workflows run from the default branch.
+
+No secrets, no PAT: the default `GITHUB_TOKEN` suffices — **but it must have `contents: write` as well
+as `pull-requests: write`.** `convertPullRequestToDraft` is refused with `Resource not accessible by
+integration` when the token only has pull-requests write; that holds for the job token and for an App
+token alike (tested both ways on music-assistant/server#6734, whose timeline shows the conversions).
+The first version of this poller had `contents: read` and never converted a single PR — it only
+commented on PRs that were already drafts, which looked like it was working. Other projects' reports
+that the job token "cannot do this whatever its permissions" are wrong; they never tried contents
+write. Confirm a real `convert_to_draft` event by
+the bot on a PR's timeline before trusting a change to this file.
 
 **Prerequisite:** Copilot automatic code review must be enabled, so reviews carrying the
 `[CRITICAL]`/`[PROBLEM]`/`[SUGGESTION]` taxonomy exist to scan.
@@ -53,8 +62,9 @@ no PAT: the default `GITHUB_TOKEN` with `pull-requests: write` suffices.
   author while a `[CRITICAL]` is still unresolved is drafted again on the next pass.
 - **False-positive escape hatch:** add the **`override-critical`** label and the gate skips the PR.
   Create that label in the repo (any colour) to make it available.
-- **Test it:** the workflow also has a `workflow_dispatch` trigger — run it manually (a human actor,
-  no approval) to exercise it immediately.
+- **Test it:** the workflow also has a `workflow_dispatch` trigger with an optional `pr` input that
+  limits the run to one PR — dispatch it (from a branch with `--ref` to try a change before merging)
+  and check that PR's timeline.
 
 ## Not yet (deferred by design)
 

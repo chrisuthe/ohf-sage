@@ -1,7 +1,8 @@
 """Render the de-personalized "Automated PR Review" agent from principles.md.
 
 Same splice pattern as build_agent.py, but strips the OHF/Sage framing and all maintainer names
-so the reviewer presents everything as the project's own coding standards.
+so the reviewer presents everything as the project's own coding standards. The one exception is a
+quote a lead attributed to themselves, which is kept as they wrote it.
 """
 import re
 import sys
@@ -11,10 +12,13 @@ START = "<!-- PRINCIPLES:START -->"
 END = "<!-- PRINCIPLES:END -->"
 
 _NAMES = re.compile(r"Marcel|Marvin|marcelveldt|MarvinSchenkel|OHF Sage|\bSage\b")
+# A lead may sign a rule themselves in the deployed files, as `Name: "quote"`. That attribution is
+# theirs to make, so it passes through unchanged; a name anywhere else is still a miss.
+_SELF_ATTRIBUTED = re.compile(r'\b(?:Marcel|Marvin): "')
 
 
 def depersonalize(text):
-    """Drop the OHF/Sage framing and every maintainer name from the principles body."""
+    """Drop the OHF/Sage framing and maintainer names (bar a self-attributed quote) from the body."""
     lines = []
     for raw in text.splitlines():
         if raw.startswith("# OHF"):
@@ -30,7 +34,7 @@ def depersonalize(text):
             line = "Cross-project engineering standards that apply regardless of which repo is in play."
         lines.append(line)
     body = "\n".join(lines).strip("\n")
-    residual = sorted(set(_NAMES.findall(body)))
+    residual = sorted(set(_NAMES.findall(_SELF_ATTRIBUTED.sub("", body))))
     if residual:
         raise ValueError(f"de-personalization missed: {residual}")
     return body

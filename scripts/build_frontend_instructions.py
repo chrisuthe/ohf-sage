@@ -33,8 +33,9 @@ CROSS_REPO_SERVER = (
     "This frontend is a client of `music-assistant/server` (Python). When a change depends on "
     "server behavior — an API command, a shared model, `schema_version`, or the wire contract — "
     "use the GitHub MCP to check `music-assistant/server` (its code and open PRs) rather than "
-    "guessing. Gate newer-server commands on `schema_version`, and never implement server-owned "
-    "logic (volume, queue, filtering) as a frontend workaround.\n"
+    "guessing. The frontend ships in lockstep with the server, so never gate on `schema_version` "
+    "or add an older-server fallback, and never implement server-owned logic (volume, queue, "
+    "filtering) as a frontend workaround.\n"
 )
 
 # The repo's README "Development Guidelines" already codify these specific standards; keep them
