@@ -18,8 +18,7 @@ is) for manual approval.** They sit at `action_required` and never execute, so t
 executes as a trusted actor. That single choice also sidesteps two other walls the event design hit:
 
 - **Fork tokens** — a `pull_request_review` run on a fork PR gets a read-only token, so it cannot
-  draft anything. A scheduled run is base-context, so it can use the repo's secrets to mint the bot
-  token that does the writing.
+  draft anything. A scheduled run is base-context and keeps its write token.
 - **Artifact trust** — the two-stage `workflow_run` workaround had to pass the PR across a trust
   boundary. The poller reads everything first-hand, so there is nothing to forge.
 
@@ -28,12 +27,14 @@ executes as a trusted actor. That single choice also sidesteps two other walls t
 Copy `critical-gate-poll.yml` to `.github/workflows/critical-gate-poll.yml` on the default branch
 (`dev` for `music-assistant/server`) — scheduled workflows run from the default branch.
 
-It needs the repo's bot App (`vars.MUSIC_ASSISTANT_BOT_CLIENT_ID` +
-`secrets.MUSIC_ASSISTANT_BOT_PRIVATE_KEY`), minted and identity-checked the same way `pr-checks.yml`
-does. **The job token is not enough:** GitHub refuses `convertPullRequestToDraft` to the Actions
-`GITHUB_TOKEN` whatever `permissions:` grants (`Resource not accessible by integration`). The first
-version of this poller used the job token and never converted a single PR — it only commented on PRs
-that were already drafts, which looked like it was working. Confirm a real `convert_to_draft` event by
+No secrets, no PAT: the default `GITHUB_TOKEN` suffices — **but it must have `contents: write` as well
+as `pull-requests: write`.** `convertPullRequestToDraft` is refused with `Resource not accessible by
+integration` when the token only has pull-requests write; that holds for the job token and for an App
+token alike (tested both ways on music-assistant/server#6734, whose timeline shows the conversions).
+The first version of this poller had `contents: read` and never converted a single PR — it only
+commented on PRs that were already drafts, which looked like it was working. Other projects' reports
+that the job token "cannot do this whatever its permissions" are wrong; they never tried contents
+write. Confirm a real `convert_to_draft` event by
 the bot on a PR's timeline before trusting a change to this file.
 
 **Prerequisite:** Copilot automatic code review must be enabled, so reviews carrying the
