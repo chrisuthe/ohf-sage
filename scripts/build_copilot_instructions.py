@@ -60,7 +60,7 @@ GUARDS = (
     "- **`except Exception` around a duplicate-column check is the migration idiom.** In "
     "`controllers/music/migrations.py` an `ALTER TABLE ... ADD COLUMN` step catches `Exception` "
     "and re-raises unless the message contains `duplicate column` — that is what makes the step "
-    "safe to re-run, and every step in the file does it. Do not flag it as a broad except or ask "
+    "safe to re-run, and it is the prevailing idiom in that file. Do not flag it as a broad except or ask "
     "one step to switch to `sqlite3.OperationalError`; narrowing them is a separate file-wide "
     "cleanup.\n"
     "- **A changed config-entry default needs no migration.** Config only persists values that "
