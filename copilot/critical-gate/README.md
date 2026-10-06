@@ -45,8 +45,10 @@ the bot on a PR's timeline before trusting a change to this file.
 - **Only `[CRITICAL]` gates.** `[PROBLEM]`/`[SUGGESTION]` are ignored.
 - **Scoped to mergeable bases** (`dev`, `stable`).
 - **Recent, unresolved findings only:** it gates on **unresolved, non-outdated** `[CRITICAL]` threads
-  whose Copilot review was posted within the last **~30 minutes** (a tunable window, matched to the
-  exact Copilot bot login — no username substring). Recency, not "latest review", keeps the poller a
+  whose Copilot review was posted within the last **2 hours** (a tunable window, matched to the
+  exact Copilot bot login — no username substring). The window is that wide because GitHub does not
+  honour the 10-minute cron: measured over 300 runs, they land a median 22 minutes apart with gaps of
+  over an hour, and at 30 minutes about one fresh critical in five aged out before any run saw it. Recency, not "latest review", keeps the poller a
   *responder* to fresh criticals rather than a perpetual enforcer that re-drafts an old, ignored
   critical forever. A resolved critical, one whose code the author has since changed, or one that has
   aged past the window no longer gates — and dev's `required_review_thread_resolution` ruleset still
