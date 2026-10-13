@@ -132,7 +132,8 @@ CROSS_REPO_MODELS = (
 )
 
 # PR-description quality: enforce the AI Policy + template. Repo-wide (`applyTo: "**"`), its own
-# file — the description applies to every PR regardless of which files change.
+# file — the description applies to every PR regardless of which files change. The closing
+# paragraph keeps the review off the type-of-change box: the leads declined every such finding.
 PR_DESCRIPTION_FRONTMATTER = '---\napplyTo: "**"\n---\n\n'
 PR_DESCRIPTION = (
     "<!-- Generated; additive to copilot-instructions.md + AGENTS.md. -->\n"
@@ -154,7 +155,13 @@ PR_DESCRIPTION = (
     "When you raise it, say: \"This needs to more clearly describe the issue you're having and "
     'what it\'s fixing," name any extra template sections to remove, and you may offer one concise '
     "rewrite (a few sentences) the author can validate and use. Judge the description, not the "
-    "author.\n"
+    "author.\n\n"
+    'Do not question which "Types of changes" box is ticked. That choice belongs to the author '
+    "and the maintainers: `bugfix` is reserved for bugs somebody reported, and hardening, "
+    "robustness or consistency work that nobody reported is `maintenance` even when it changes "
+    "runtime behaviour. Raise nothing about the selected type, or about the label and "
+    "release-notes category that follow from it. This covers only which type is selected; a "
+    "required checklist item left unticked is still worth raising.\n"
 )
 
 
