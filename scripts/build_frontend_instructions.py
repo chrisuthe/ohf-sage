@@ -34,8 +34,9 @@ CROSS_REPO_SERVER = (
     "server behavior — an API command, a shared model, `schema_version`, or the wire contract — "
     "use the GitHub MCP to check `music-assistant/server` (its code and open PRs) rather than "
     "guessing. The frontend ships in lockstep with the server, so never gate on `schema_version` "
-    "or add an older-server fallback, and never implement server-owned logic (volume, queue, "
-    "filtering) as a frontend workaround.\n"
+    "or add an older-server fallback (raise `MIN_SERVER_SCHEMA_VERSION` when the previous stable "
+    "server would break), and never implement server-owned logic (volume, queue, filtering) as a "
+    "frontend workaround.\n"
 )
 
 # The repo's README "Development Guidelines" already codify these specific standards; keep them
@@ -52,6 +53,11 @@ README_COVERED = re.compile(
 )
 
 
+# Authored rules the frontend maintainers added to the deployed shard themselves, even though the
+# README covers them. Kept, so that regenerating the shard does not drop their line.
+MAINTAINER_PLACED = re.compile(r"style with Tailwind utility classes first")
+
+
 def _is_rule(line: str) -> bool:
     return line.lstrip().startswith("- **")
 
@@ -59,6 +65,8 @@ def _is_rule(line: str) -> bool:
 def _keep(line: str) -> bool:
     """Keep mined frontend rules except those the README already codifies or enforced/authored."""
     s = line.rstrip()
+    if MAINTAINER_PLACED.search(s):
+        return True
     if s.endswith("[enforced]") or s.endswith("[authored]"):
         return False
     return not README_COVERED.search(s)
