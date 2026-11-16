@@ -190,6 +190,14 @@ def test_note_when_corpus_absent(tmp_path, capsys):
     assert "no local corpus" in capsys.readouterr().err.lower()
 
 
+class _Response(io.BytesIO):
+    """What urlopen returns: the body, and the address it finally came from."""
+
+    def __init__(self, body, url):
+        super().__init__(body)
+        self.url = url
+
+
 def _install(tmp_path):
     agent = tmp_path / "ohf-sage.md"
     agent.write_text("AGENT", encoding="utf-8")
@@ -202,7 +210,7 @@ def test_install_fetches_the_shared_memory(tmp_path, monkeypatch, home):
 
     def fake_urlopen(url, timeout=None):
         timeouts.append(timeout)
-        return io.BytesIO(b"BODY " + url.encode() + b"\n")
+        return _Response(b"BODY " + url.encode() + b"\n", url)
     monkeypatch.setattr(inst.urllib.request, "urlopen", fake_urlopen)
 
     repo, rc = _install(tmp_path)
@@ -240,7 +248,7 @@ def test_one_failed_download_does_not_stop_the_others(tmp_path, monkeypatch, hom
     def fake_urlopen(url, timeout=None):
         if url.endswith("/index.md"):
             raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
-        return io.BytesIO(b"BODY")
+        return _Response(b"BODY", url)
     monkeypatch.setattr(inst.urllib.request, "urlopen", fake_urlopen)
 
     repo, rc = _install(tmp_path)
@@ -253,6 +261,8 @@ def test_one_failed_download_does_not_stop_the_others(tmp_path, monkeypatch, hom
 
 class _DroppedConnection:
     """A response whose body never arrives whole."""
+
+    url = MEMORY_URL
 
     def __enter__(self):
         return self
@@ -278,10 +288,24 @@ def test_failed_download_keeps_the_copy_on_disk(tmp_path, monkeypatch, home):
 
 def test_unwritable_destination_does_not_fail_the_install(tmp_path, monkeypatch, capsys, home):
     (home / ".ma-shared-memory").write_text("a file where the folder should be", encoding="utf-8")
-    monkeypatch.setattr(inst.urllib.request, "urlopen", lambda url, timeout=None: io.BytesIO(b"BODY"))
+    monkeypatch.setattr(inst.urllib.request, "urlopen", lambda url, timeout=None: _Response(b"BODY", url))
 
     repo, rc = _install(tmp_path)
 
     assert rc == 0
     assert (home / ".claude/skills/ma-shared-memory/SKILL.md").exists()
     assert capsys.readouterr().err.count("could not download") == 2
+
+
+def test_download_redirected_off_https_is_refused(tmp_path, monkeypatch, capsys, home):
+    monkeypatch.setattr(inst.urllib.request, "urlopen",
+                        lambda url, timeout=None: _Response(b"TAMPERED", "http://example.org/SKILL.md"))
+
+    repo, rc = _install(tmp_path)
+
+    assert rc == 0
+    assert not (home / ".claude").exists()
+    assert not (home / ".ma-shared-memory").exists()
+    err = capsys.readouterr().err
+    assert err.count("could not download") == 3
+    assert "not HTTPS" in err
