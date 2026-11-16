@@ -1,5 +1,6 @@
 # scripts/install.py
 import argparse
+import http.client
 import os
 import re
 import shutil
@@ -13,6 +14,13 @@ from pathlib import Path
 _RELEASE_REPO = "chrisuthe/ohf-sage"
 _RELEASE_ASSETS = ["ohf-sage.md", "ohf-sage-corpus.jsonl"]
 _CORPUS_REL_PATH = ".claude/agents/ohf-sage-corpus.jsonl"
+_SHARED_MEMORY_URL = "https://music-assistant.github.io/pr-triage"
+# Published path -> where it is saved under the home folder.
+_SHARED_MEMORY_FILES = {
+    "skill/SKILL.md": ".claude/skills/ma-shared-memory/SKILL.md",
+    "index.md": ".ma-shared-memory/index.md",
+    "memory.md": ".ma-shared-memory/memory.md",
+}
 
 
 def release_asset_url(repo, asset):
@@ -29,6 +37,26 @@ def download_release_assets(repo, dest_dir):
         urllib.request.urlretrieve(release_asset_url(repo, asset), dest)
         paths.append(dest)
     return paths
+
+
+def fetch_shared_memory(home):
+    """Download the Music Assistant shared-memory skill and the first copy of the
+    memory under home; return the paths saved. The memory is optional, so a failed
+    download is reported and skipped, leaving any earlier copy as it was."""
+    saved = []
+    for published, rel_path in _SHARED_MEMORY_FILES.items():
+        url = f"{_SHARED_MEMORY_URL}/{published}"
+        dest = Path(home) / rel_path
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                body = response.read()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(body)
+        except (OSError, http.client.HTTPException) as e:
+            print(f"note: could not download {url}: {e}", file=sys.stderr)
+            continue
+        saved.append(dest)
+    return saved
 
 
 def install(agent_path, repo_dir):
@@ -162,6 +190,8 @@ def main(argv=None):
             exclude_path = add_local_exclude(args.repo_dir, dest)
             if exclude_path:
                 print(f"excluded -> {dest.name}")
+    for dest in fetch_shared_memory(Path.home()):
+        print(f"installed -> {dest}")
     if not args.no_corpus and not args.from_release and not corpus_path.is_file():
         print("note: no local corpus found; installed the agent only. "
               "Run with --from-release to also fetch the review-history corpus.", file=sys.stderr)

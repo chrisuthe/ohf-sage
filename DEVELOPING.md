@@ -115,7 +115,8 @@ captured via the `add-manual-principle` skill. This overlay is not harvested, no
 part of the shipped corpus, and stays private to your setup. To contribute an
 entry to the shared `principles.md` upstream, use `propose-principle-upstream`,
 which opens a GitHub issue for maintainer review and publishes the claim publicly
-(with explicit confirmation).
+(with explicit confirmation). For a Music Assistant entry, someone who can write to
+the maintainers' shared memory is sent to its `Memory:` PR flow instead.
 
 ### 6. Review the principles (required)
 
