@@ -1,8 +1,30 @@
+import http.client
+import io
 import sys
+import urllib.error
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import install as inst  # noqa: E402
 from install import add_local_exclude, main, point_at_corpus  # noqa: E402
+
+MEMORY_URL = "https://music-assistant.github.io/pr-triage"
+
+
+@pytest.fixture(autouse=True)
+def home(tmp_path, monkeypatch):
+    """Every test gets an empty home folder and no network."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+    def no_network(url, timeout=None):
+        raise urllib.error.URLError("network disabled in tests")
+    monkeypatch.setattr(inst.urllib.request, "urlopen", no_network)
+    return home
 
 
 def test_local_exclude_appends_once_for_plain_git_dir(tmp_path):
@@ -166,3 +188,100 @@ def test_note_when_corpus_absent(tmp_path, capsys):
     repo = tmp_path / "repo"; repo.mkdir()
     inst.main([str(repo), "--agent", str(agent), "--corpus", str(tmp_path / "nope.jsonl")])
     assert "no local corpus" in capsys.readouterr().err.lower()
+
+
+def _install(tmp_path):
+    agent = tmp_path / "ohf-sage.md"
+    agent.write_text("AGENT", encoding="utf-8")
+    repo = tmp_path / "repo"
+    return repo, inst.main([str(repo), "--agent", str(agent), "--no-corpus"])
+
+
+def test_install_fetches_the_shared_memory(tmp_path, monkeypatch, home):
+    timeouts = []
+
+    def fake_urlopen(url, timeout=None):
+        timeouts.append(timeout)
+        return io.BytesIO(b"BODY " + url.encode() + b"\n")
+    monkeypatch.setattr(inst.urllib.request, "urlopen", fake_urlopen)
+
+    repo, rc = _install(tmp_path)
+
+    assert rc == 0
+    assert (home / ".claude/skills/ma-shared-memory/SKILL.md").read_bytes() == \
+        f"BODY {MEMORY_URL}/skill/SKILL.md\n".encode()
+    assert (home / ".ma-shared-memory/index.md").read_bytes() == f"BODY {MEMORY_URL}/index.md\n".encode()
+    assert (home / ".ma-shared-memory/memory.md").read_bytes() == f"BODY {MEMORY_URL}/memory.md\n".encode()
+    assert len(timeouts) == 3 and all(t and t > 0 for t in timeouts)
+
+
+@pytest.mark.parametrize("error", [
+    urllib.error.URLError("no network"),
+    TimeoutError("timed out"),
+    http.client.IncompleteRead(b"half"),
+])
+def test_failed_downloads_do_not_fail_the_install(tmp_path, monkeypatch, capsys, home, error):
+    def boom(url, timeout=None):
+        raise error
+    monkeypatch.setattr(inst.urllib.request, "urlopen", boom)
+
+    repo, rc = _install(tmp_path)
+
+    assert rc == 0
+    assert (repo / ".claude" / "agents" / "ohf-sage.md").exists()
+    assert not (home / ".ma-shared-memory").exists()
+    assert not (home / ".claude").exists()
+    err = capsys.readouterr().err
+    assert err.count("could not download") == 3
+    assert f"{MEMORY_URL}/index.md" in err
+
+
+def test_one_failed_download_does_not_stop_the_others(tmp_path, monkeypatch, home):
+    def fake_urlopen(url, timeout=None):
+        if url.endswith("/index.md"):
+            raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+        return io.BytesIO(b"BODY")
+    monkeypatch.setattr(inst.urllib.request, "urlopen", fake_urlopen)
+
+    repo, rc = _install(tmp_path)
+
+    assert rc == 0
+    assert (home / ".claude/skills/ma-shared-memory/SKILL.md").exists()
+    assert (home / ".ma-shared-memory/memory.md").exists()
+    assert not (home / ".ma-shared-memory/index.md").exists()
+
+
+class _DroppedConnection:
+    """A response whose body never arrives whole."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, *args):
+        raise http.client.IncompleteRead(b"half")
+
+
+def test_failed_download_keeps_the_copy_on_disk(tmp_path, monkeypatch, home):
+    saved = home / ".ma-shared-memory" / "index.md"
+    saved.parent.mkdir()
+    saved.write_bytes(b"OLD")
+    monkeypatch.setattr(inst.urllib.request, "urlopen", lambda url, timeout=None: _DroppedConnection())
+
+    repo, rc = _install(tmp_path)
+
+    assert rc == 0
+    assert saved.read_bytes() == b"OLD"
+
+
+def test_unwritable_destination_does_not_fail_the_install(tmp_path, monkeypatch, capsys, home):
+    (home / ".ma-shared-memory").write_text("a file where the folder should be", encoding="utf-8")
+    monkeypatch.setattr(inst.urllib.request, "urlopen", lambda url, timeout=None: io.BytesIO(b"BODY"))
+
+    repo, rc = _install(tmp_path)
+
+    assert rc == 0
+    assert (home / ".claude/skills/ma-shared-memory/SKILL.md").exists()
+    assert capsys.readouterr().err.count("could not download") == 2
