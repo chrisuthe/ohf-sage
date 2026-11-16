@@ -72,6 +72,26 @@ curl -L -o .claude/agents/ohf-sage-corpus.jsonl \
   https://github.com/chrisuthe/ohf-sage/releases/latest/download/ohf-sage-corpus.jsonl
 ```
 
+## The Music Assistant shared memory
+
+Every `install.py` route also sets up the Music Assistant maintainers'
+[shared memory](https://music-assistant.github.io/pr-triage/) for your user account:
+
+- the `ma-shared-memory` skill, in `~/.claude/skills/ma-shared-memory/`;
+- the first copy of the memory (`index.md` and `memory.md`), in `~/.ma-shared-memory/`.
+
+The sage reads those saved copies when a question is about Music Assistant, and the skill
+refreshes them once per session. If a download fails, the install still succeeds and the
+sage works without the memory; run the installer again to retry. To remove it, delete both
+folders. Running the installer again puts them back.
+
+The plain `cp`/`curl` routes skip this. To add the skill by hand:
+
+```bash
+curl -fsSL --create-dirs -o ~/.claude/skills/ma-shared-memory/SKILL.md \
+  https://music-assistant.github.io/pr-triage/skill/SKILL.md
+```
+
 ## Use it
 
 Ask Claude Code things like:

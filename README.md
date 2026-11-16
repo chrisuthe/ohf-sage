@@ -67,6 +67,9 @@ or pushed:
 python scripts/install.py /path/to/the/repo --local-exclude
 ```
 
+`install.py` also fetches the Music Assistant maintainers' shared memory and its skill
+for your user account ([what and where](INSTALL.md#the-music-assistant-shared-memory)).
+
 More detail and platform-specific (PowerShell) commands: [INSTALL.md](INSTALL.md).
 You don't need Python just to *use* the agent — the copy/`curl` routes are plain
 file copies; only `install.py` uses Python (3.9+).
@@ -139,7 +142,9 @@ skills below need the one-time [Full local setup](#full-local-setup-skills--clis
 
 - To contribute an entry to the shared repo, run **`propose-principle-upstream`**,
   which opens a GitHub issue for maintainer review. **This publishes your claim
-  publicly**, so it asks for explicit confirmation before opening the issue.
+  publicly**, so it asks for explicit confirmation before opening the issue. For a
+  Music Assistant entry, someone who can write to the maintainers' shared memory is
+  sent to its `Memory:` PR flow instead.
 
 ## Whose principles these are
 
