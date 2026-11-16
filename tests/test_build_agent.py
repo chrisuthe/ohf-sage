@@ -4,6 +4,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from build_agent import build_agent  # noqa: E402
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 def _write(p, text):
     p.write_text(text, encoding="utf-8")
@@ -32,3 +34,11 @@ def test_build_agent_requires_markers(tmp_path):
     import pytest
     with pytest.raises(ValueError):
         build_agent(template, principles, tmp_path / "o.md")
+
+
+def test_shipped_agent_reads_the_saved_shared_memory():
+    for name in ("agent/ohf-sage.template.md", "agent/ohf-sage.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        for needed in ("~/.ma-shared-memory/index.md", "~/.ma-shared-memory/memory.md",
+                       "## rule: <name>", "## area: <repo>:<path>"):
+            assert needed in text, f"{name} does not mention {needed}"
