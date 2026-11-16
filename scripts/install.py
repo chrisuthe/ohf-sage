@@ -42,13 +42,16 @@ def download_release_assets(repo, dest_dir):
 def fetch_shared_memory(home):
     """Download the Music Assistant shared-memory skill and the first copy of the
     memory under home; return the paths saved. The memory is optional, so a failed
-    download is reported and skipped, leaving any earlier copy as it was."""
+    download, or one redirected off HTTPS, is reported and skipped, leaving any
+    earlier copy as it was."""
     saved = []
     for published, rel_path in _SHARED_MEMORY_FILES.items():
         url = f"{_SHARED_MEMORY_URL}/{published}"
         dest = Path(home) / rel_path
         try:
             with urllib.request.urlopen(url, timeout=30) as response:
+                if not response.url.startswith("https://"):
+                    raise urllib.error.URLError(f"redirected to {response.url}, which is not HTTPS")
                 body = response.read()
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(body)
