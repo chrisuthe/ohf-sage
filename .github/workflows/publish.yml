@@ -5,9 +5,14 @@ on:
     branches: [master]
     paths:
       - corpus-manifest.json
+      - agent/ohf-sage.md
+      - .github/workflows/publish.yml
 
 permissions:
   contents: write
+
+# One run at a time, so two merges in a row cannot upload over each other.
+concurrency: publish-release
 
 jobs:
   publish:
@@ -16,7 +21,25 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the step below diffs against the commit before the push
+      - name: Detect manifest change
+        id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          files=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- corpus-manifest.json)
+          if [ -n "$files" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      # Only a manifest merge promotes. On any other push the newest prerelease
+      # is an old one that was never merged, and promoting it would roll the
+      # corpus back.
       - name: Promote newest corpus prerelease to latest
+        id: promote
+        if: steps.diff.outputs.changed == 'true'
         run: |
           tag=$(gh release list --limit 30 --json tagName,isPrerelease \
             --jq '[.[] | select(.isPrerelease and (.tagName | startswith("corpus-")))][0].tagName')
@@ -25,3 +48,20 @@ jobs:
           fi
           gh release edit "$tag" --prerelease=false --latest
           echo "promoted $tag to latest"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      # A prerelease carries the agent as it was when the refresh ran, which can
+      # be older than master's. The committed file is the one to ship.
+      - name: Upload the committed agent to the latest release
+        env:
+          PROMOTED: ${{ steps.promote.outputs.tag }}
+        run: |
+          tag="$PROMOTED"
+          if [ -z "$tag" ]; then
+            tag=$(gh release list --exclude-drafts --exclude-pre-releases \
+              --json tagName,isLatest --jq '.[] | select(.isLatest) | .tagName')
+          fi
+          if [ -z "$tag" ]; then
+            echo "no release to update"; exit 0
+          fi
+          gh release upload "$tag" agent/ohf-sage.md --clobber
+          echo "uploaded agent/ohf-sage.md to $tag"

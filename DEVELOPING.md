@@ -148,8 +148,23 @@ The corpus and principles are refreshed regularly without requiring a new checko
   `corpus-manifest.json` (a timestamp plus per-repo record counts, and the total).
 - On merge, `.github/workflows/publish.yml` promotes the prerelease to the `latest`
   Release, making the new corpus available via `--from-release` / `releases/latest/download` URLs.
+  It then replaces that release's `ohf-sage.md` with the one committed on `master`: the
+  prerelease carries the agent as it was when the refresh ran, and `master` may have moved
+  on since.
 - Users installing via `--from-release` or the `curl` routes always get the newest corpus
   without needing to re-clone or rebuild locally.
+
+**Agent publish (automated, on merge):**
+
+- A merge to `master` that changes `agent/ohf-sage.md` (or `publish.yml` itself) also runs
+  `publish.yml`. It uploads the committed file over the `ohf-sage.md` asset of the `latest`
+  Release, so `--from-release` installs get the new agent straight away instead of waiting
+  for the next corpus refresh.
+- Such a merge promotes nothing: only a merge that changes `corpus-manifest.json` promotes
+  a prerelease, and the corpus in the release is otherwise left alone.
+- The workflow ships the committed `agent/ohf-sage.md` and never rebuilds it. A change to
+  the template or the principles reaches users once the rebuilt agent is committed with it.
+- If there is no release yet, the workflow does nothing.
 
 **Principles refresh (local, human-driven):**
 
@@ -163,8 +178,8 @@ The corpus and principles are refreshed regularly without requiring a new checko
      the agent template.
   4. Test & commit: run the test suite, open a PR with the new `principles/principles.md`
      and rebuilt `agent/ohf-sage.md`.
-- On merge to `master`, the next automated corpus refresh bundles the new agent into the
-  release.
+- On merge to `master`, `publish.yml` uploads the new agent to the `latest` Release (see
+  "Agent publish" above).
 
 ## Tests
 
